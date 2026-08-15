@@ -222,7 +222,7 @@
     <span class="updated-note" id="updatedNote"></span>
   </div>
 
-  <p class="fact">ISSは地球を約90分で1周し、高度およそ400km・時速約27,600kmで飛行しています。5秒ごとに最新の位置を取得します。</p>
+  <p class="fact">ISSは地球を約90分で1周し、高度およそ400km・時速約27,600kmで飛行しています。過去30分の軌跡を表示し、5秒ごとに最新の位置を取得します。</p>
 
   <footer>
     <span>Data: <a href="https://wheretheiss.at" target="_blank" rel="noopener">wheretheiss.at</a> · map: <a href="https://github.com/johan/world.geo.json" target="_blank" rel="noopener">johan/world.geo.json</a></span>
@@ -235,8 +235,10 @@
   "use strict";
 
   var API_URL = "https://api.wheretheiss.at/v1/satellites/25544";
+  var HISTORY_URL = "https://api.wheretheiss.at/v1/satellites/25544/positions";
   var POLL_MS = 5000;
-  var MAX_TRAIL = 90;
+  var TRAIL_MINUTES = 30;
+  var TRAIL_WINDOW_MS = TRAIL_MINUTES * 60 * 1000;
   var MAP_URL = "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json";
 
   var canvas = document.getElementById("mapCanvas");
@@ -378,6 +380,22 @@
       }
     }
 
+    // oldest trail point: mark it and label how long ago it was
+    if (trail.length > 1) {
+      var oldest = trail[0];
+      var po = project(oldest.latitude, oldest.longitude, w, h);
+      var ageMin = Math.round((Date.now() / 1000 - oldest.timestamp) / 60);
+      ctx.fillStyle = "rgba(255, 157, 77, 0.55)";
+      ctx.beginPath();
+      ctx.arc(po.x, po.y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = getVar("--text-faint");
+      ctx.font = "10px ui-monospace, monospace";
+      ctx.textBaseline = "middle";
+      var labelX = Math.min(Math.max(po.x + 7, 2), w - 60);
+      ctx.fillText("-" + ageMin + "分", labelX, po.y);
+    }
+
     // current marker
     if (trail.length > 0) {
       var cur = trail[trail.length - 1];
@@ -423,6 +441,11 @@
     draw();
   }
 
+  function pruneTrail() {
+    var cutoff = Date.now() / 1000 - TRAIL_WINDOW_MS / 1000;
+    while (trail.length > 0 && trail[0].timestamp < cutoff) trail.shift();
+  }
+
   function fetchPosition() {
     setStatus(null, "更新中…");
     return fetch(API_URL)
@@ -434,7 +457,7 @@
         hasEverSucceeded = true;
         lastFetchAt = Date.now();
         trail.push(data);
-        if (trail.length > MAX_TRAIL) trail.shift();
+        pruneTrail();
         render(data);
         overlay.hidden = true;
         setStatus("live", "LIVE");
@@ -446,6 +469,29 @@
           overlayText.textContent = "ISSの位置情報を取得できませんでした。ネットワーク接続を確認して再試行してください。";
           retryBtn.hidden = false;
         }
+      });
+  }
+
+  function fetchHistory() {
+    var nowSec = Math.floor(Date.now() / 1000);
+    var timestamps = [];
+    for (var m = TRAIL_MINUTES - 1; m >= 1; m--) {
+      timestamps.push(nowSec - m * 60);
+    }
+    return fetch(HISTORY_URL + "?timestamps=" + timestamps.join(",") + "&units=kilometers")
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (points) {
+        if (!Array.isArray(points)) return;
+        points.sort(function (a, b) { return a.timestamp - b.timestamp; });
+        trail = points.concat(trail);
+        pruneTrail();
+        draw();
+      })
+      .catch(function () {
+        // Past track is a nice-to-have; live polling still builds a track going forward.
       });
   }
 
@@ -480,6 +526,7 @@
 
   sizeCanvas();
   loadWorldMap();
+  fetchHistory();
   startPolling();
 })();
 </script>
