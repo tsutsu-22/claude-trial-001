@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>フルーツポン</title>
+<meta name="description" content="同じフルーツをくっつけて大きく育てる落ちものパズル。スマホでドラッグして落とそう。" />
+<meta name="theme-color" content="#1b1e24" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍉</text></svg>" />
+<style>
+  :root {
+    --bg: #1b1e24;
+    --panel: #23272f;
+    --border: #343b46;
+    --text: #edeef1;
+    --text-dim: #9aa1ad;
+    --text-faint: #5f6672;
+    --accent: #7ac74f;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background:
+      radial-gradient(circle, rgba(255,255,255,0.05) 1px, transparent 1.3px) 0 0/26px 26px,
+      var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    overscroll-behavior: none;
+  }
+
+  .wrap {
+    width: 100%;
+    max-width: 440px;
+    padding: 16px 14px calc(20px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+  }
+
+  .back {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    text-decoration: none;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    align-self: flex-start;
+  }
+  .back:hover { color: var(--text); }
+
+  h1 {
+    margin: 10px 0 12px;
+    font-size: 1.45rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .scores {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .box {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 11px;
+  }
+
+  .label {
+    display: block;
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    color: var(--text-faint);
+    font-family: ui-monospace, monospace;
+  }
+
+  .value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  #board {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 10px;
+    background: #14171c;
+    border: 1px solid var(--border);
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .chain {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 2px;
+    margin-top: 12px;
+    font-size: 0.95rem;
+    line-height: 1;
+    opacity: 0.85;
+  }
+  .chain span.arrow { color: var(--text-faint); font-size: 0.6rem; }
+
+  .row {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  button {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.85rem;
+    padding: 12px 0;
+    cursor: pointer;
+    font-family: inherit;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  button:hover { background: #292e37; border-color: var(--accent); }
+  button:active { background: #313742; }
+
+  .hint {
+    margin: 12px 0 0;
+    font-size: 0.72rem;
+    color: var(--text-faint);
+    line-height: 1.7;
+    font-family: ui-monospace, monospace;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="../">← Games</a>
+  <h1>🍉 フルーツポン</h1>
+
+  <div class="scores">
+    <div class="box"><span class="label">SCORE</span><span class="value" id="score">0</span></div>
+    <div class="box"><span class="label">BEST</span><span class="value" id="best">0</span></div>
+  </div>
+
+  <canvas id="board"></canvas>
+
+  <div class="chain" id="chain"></div>
+
+  <div class="row">
+    <button id="restart" type="button">はじめから</button>
+  </div>
+
+  <p class="hint">画面を指でなぞって位置を決めて、はなすと落ちる</p>
+</div>
+
+<script>
+(() => {
+  const W = 360;
+  const H = 520;
+  const WALL = 6;          // inner wall thickness
+  const DANGER_Y = 96;     // fruits resting above this line end the game
+  const DROP_Y = 52;
+  const GRAVITY = 0.42;
+  const AIR = 0.992;
+  const BOUNCE = 0.12;
+  const ITERATIONS = 7;
+  const CONTACT = 2;       // px of slack that still counts as fruit touching
+  const DROP_COOLDOWN = 380;
+  const OVER_GRACE = 55;   // frames a fruit may sit above the line
+  const STEP = 1000 / 60;
+  const STORAGE_KEY = "suika-high-score";
+
+  // radius / colour / emoji for each stage of the chain
+  const FRUITS = [
+    { name: "さくらんぼ", r: 14, color: "#e0384e", emoji: "🍒" },
+    { name: "いちご",     r: 19, color: "#f0526d", emoji: "🍓" },
+    { name: "ぶどう",     r: 25, color: "#8e6bbf", emoji: "🍇" },
+    { name: "みかん",     r: 31, color: "#f5a03c", emoji: "🍊" },
+    { name: "キウイ",     r: 38, color: "#8fbf4b", emoji: "🥝" },
+    { name: "りんご",     r: 46, color: "#e0453e", emoji: "🍎" },
+    { name: "なし",       r: 55, color: "#c8d44a", emoji: "🍐" },
+    { name: "もも",       r: 64, color: "#f78fa7", emoji: "🍑" },
+    { name: "パイナップル", r: 75, color: "#f2c14e", emoji: "🍍" },
+    { name: "メロン",     r: 86, color: "#a8d98b", emoji: "🍈" },
+    { name: "スイカ",     r: 96, color: "#4caf50", emoji: "🍉" },
+  ];
+  // points awarded for creating each stage (triangular numbers, as in the original)
+  const MERGE_SCORE = [1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 66];
+  const DROPPABLE = 5; // only the smallest few ever fall from the top
+
+  const canvas = document.getElementById("board");
+  const ctx = canvas.getContext("2d");
+  const el = {
+    score: document.getElementById("score"),
+    best: document.getElementById("best"),
+    chain: document.getElementById("chain"),
+    restart: document.getElementById("restart"),
+  };
+
+  let fruits, score, best, over, aimX, current, nextType, dropLock, accumulator, lastTime, idSeq;
+  best = Number(localStorage.getItem(STORAGE_KEY) || 0);
+
+  function setupCanvas() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function randomType() {
+    return Math.floor(Math.random() * DROPPABLE);
+  }
+
+  function reset() {
+    fruits = [];
+    score = 0;
+    over = false;
+    aimX = W / 2;
+    dropLock = 0;
+    idSeq = 0;
+    nextType = randomType();
+    current = randomType();
+    accumulator = 0;
+    lastTime = undefined;
+    updateScore();
+  }
+
+  function updateScore() {
+    el.score.textContent = score;
+    el.best.textContent = best;
+  }
+
+  function clampAim(x, type) {
+    const r = FRUITS[type].r;
+    return Math.max(WALL + r, Math.min(W - WALL - r, x));
+  }
+
+  function addFruit(type, x, y, vx, vy) {
+    const f = {
+      id: idSeq++,
+      type,
+      r: FRUITS[type].r,
+      x,
+      y,
+      px: x - (vx || 0),
+      py: y - (vy || 0),
+      age: 0,
+      overTime: 0,
+      pop: 0,
+    };
+    fruits.push(f);
+    return f;
+  }
+
+  function drop() {
+    if (over || current === null || dropLock > 0) return;
+    addFruit(current, clampAim(aimX, current), DROP_Y, 0, 0);
+    current = null;
+    dropLock = DROP_COOLDOWN;
+  }
+
+  function physicsStep() {
+    // integrate (verlet)
+    for (const f of fruits) {
+      const vx = (f.x - f.px) * AIR;
+      const vy = (f.y - f.py) * AIR;
+      f.px = f.x;
+      f.py = f.y;
+      f.x += vx;
+      f.y += vy + GRAVITY;
+      f.age++;
+      if (f.pop > 0) f.pop--;
+    }
+
+    for (let it = 0; it < ITERATIONS; it++) {
+      // fruit vs fruit
+      for (let i = 0; i < fruits.length; i++) {
+        const a = fruits[i];
+        for (let j = i + 1; j < fruits.length; j++) {
+          const b = fruits[j];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const min = a.r + b.r;
+          if (Math.abs(dx) > min || Math.abs(dy) > min) continue;
+          const distSq = dx * dx + dy * dy;
+          if (distSq >= min * min || distSq === 0) continue;
+          const dist = Math.sqrt(distSq);
+          const nx = dx / dist;
+          const ny = dy / dist;
+          const overlap = min - dist;
+          const ma = a.r * a.r;
+          const mb = b.r * b.r;
+          const total = ma + mb;
+          a.x -= nx * overlap * (mb / total);
+          a.y -= ny * overlap * (mb / total);
+          b.x += nx * overlap * (ma / total);
+          b.y += ny * overlap * (ma / total);
+        }
+      }
+      // walls and floor
+      for (const f of fruits) {
+        const left = WALL + f.r;
+        const right = W - WALL - f.r;
+        const floor = H - WALL - f.r;
+        if (f.x < left) {
+          const v = f.x - f.px;
+          f.x = left;
+          f.px = f.x + v * BOUNCE;
+        } else if (f.x > right) {
+          const v = f.x - f.px;
+          f.x = right;
+          f.px = f.x + v * BOUNCE;
+        }
+        if (f.y > floor) {
+          const v = f.y - f.py;
+          f.y = floor;
+          f.py = f.y + v * BOUNCE;
+        }
+      }
+    }
+
+    resolveMerges();
+    checkGameOver();
+  }
+
+  function resolveMerges() {
+    const gone = new Set();
+    for (let i = 0; i < fruits.length; i++) {
+      const a = fruits[i];
+      if (gone.has(a.id) || a.type >= FRUITS.length - 1) continue;
+      for (let j = i + 1; j < fruits.length; j++) {
+        const b = fruits[j];
+        if (gone.has(b.id) || b.type !== a.type) continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        // the solver pushes overlaps fully apart, so resting fruit sits at
+        // exactly r+r — merge on contact, with a small tolerance
+        const touch = a.r + b.r + CONTACT;
+        if (dx * dx + dy * dy > touch * touch) continue;
+
+        gone.add(a.id);
+        gone.add(b.id);
+        const type = a.type + 1;
+        const merged = addFruit(
+          type,
+          (a.x + b.x) / 2,
+          (a.y + b.y) / 2,
+          ((a.x - a.px) + (b.x - b.px)) / 2,
+          ((a.y - a.py) + (b.y - b.py)) / 2
+        );
+        merged.pop = 10;
+        score += MERGE_SCORE[type];
+        break;
+      }
+    }
+    if (gone.size > 0) {
+      fruits = fruits.filter((f) => !gone.has(f.id));
+      if (score > best) {
+        best = score;
+        localStorage.setItem(STORAGE_KEY, String(best));
+      }
+      updateScore();
+    }
+  }
+
+  function checkGameOver() {
+    for (const f of fruits) {
+      // ignore fruit that is still on its way down
+      if (f.age < 40) continue;
+      const speed = Math.abs(f.y - f.py) + Math.abs(f.x - f.px);
+      if (f.y - f.r < DANGER_Y && speed < 0.9) {
+        f.overTime++;
+        if (f.overTime > OVER_GRACE) {
+          over = true;
+          return;
+        }
+      } else {
+        f.overTime = 0;
+      }
+    }
+  }
+
+  // hand-rolled so the game still runs on Safari older than 16.4 (no roundRect)
+  function roundedRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawFruit(f) {
+    const spec = FRUITS[f.type];
+    const scale = f.pop > 0 ? 1 + f.pop / 60 : 1;
+    const r = f.r * scale;
+
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = spec.color;
+    ctx.fill();
+
+    // soft top-light so the fruit reads as a ball
+    const g = ctx.createRadialGradient(f.x - r * 0.35, f.y - r * 0.4, r * 0.1, f.x, f.y, r);
+    g.addColorStop(0, "rgba(255,255,255,0.4)");
+    g.addColorStop(0.55, "rgba(255,255,255,0.05)");
+    g.addColorStop(1, "rgba(0,0,0,0.22)");
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    ctx.font = `${Math.round(r * 1.15)}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(spec.emoji, f.x, f.y + r * 0.04);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // play area
+    ctx.fillStyle = "#101318";
+    ctx.fillRect(WALL, 0, W - WALL * 2, H - WALL);
+
+    // danger line
+    ctx.save();
+    ctx.setLineDash([6, 6]);
+    ctx.strokeStyle = over ? "rgba(224,69,62,0.9)" : "rgba(224,69,62,0.45)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(WALL, DANGER_Y);
+    ctx.lineTo(W - WALL, DANGER_Y);
+    ctx.stroke();
+    ctx.restore();
+
+    // aim guide + the fruit waiting to fall
+    if (!over && current !== null) {
+      const x = clampAim(aimX, current);
+      ctx.save();
+      ctx.setLineDash([3, 7]);
+      ctx.strokeStyle = "rgba(255,255,255,0.25)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x, DROP_Y + FRUITS[current].r);
+      ctx.lineTo(x, H - WALL);
+      ctx.stroke();
+      ctx.restore();
+      drawFruit({ x, y: DROP_Y, r: FRUITS[current].r, type: current, pop: 0 });
+    }
+
+    for (const f of fruits) drawFruit(f);
+
+    // walls on top so fruit never appears to leak out
+    ctx.fillStyle = "#1b1e24";
+    ctx.fillRect(0, 0, WALL, H);
+    ctx.fillRect(W - WALL, 0, WALL, H);
+    ctx.fillRect(0, H - WALL, W, WALL);
+
+    // next-up chip
+    ctx.fillStyle = "rgba(35,39,47,0.9)";
+    ctx.strokeStyle = "#343b46";
+    ctx.lineWidth = 1;
+    roundedRect(W - 92, 10, 82, 30, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#5f6672";
+    ctx.font = '9px ui-monospace, monospace';
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText("NEXT", W - 84, 25);
+    ctx.font = '19px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+    ctx.textAlign = "center";
+    ctx.fillText(FRUITS[nextType].emoji, W - 33, 25);
+
+    if (over) {
+      ctx.fillStyle = "rgba(12,14,18,0.84)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#fff";
+      ctx.font = 'bold 26px -apple-system, system-ui, sans-serif';
+      ctx.fillText("ゲームオーバー", W / 2, H / 2 - 22);
+      ctx.fillStyle = "#9aa1ad";
+      ctx.font = '15px -apple-system, system-ui, sans-serif';
+      ctx.fillText(`スコア: ${score}　ベスト: ${best}`, W / 2, H / 2 + 10);
+      ctx.fillText("タップで もういちど", W / 2, H / 2 + 40);
+    }
+  }
+
+  function loop(time) {
+    const dt = lastTime === undefined ? 0 : Math.min(64, time - lastTime);
+    lastTime = time;
+
+    if (!over) {
+      accumulator += dt;
+      let steps = 0;
+      while (accumulator >= STEP && steps < 5) {
+        physicsStep();
+        accumulator -= STEP;
+        steps++;
+      }
+      if (dropLock > 0) {
+        dropLock -= dt;
+        if (dropLock <= 0 && current === null) {
+          current = nextType;
+          nextType = randomType();
+        }
+      }
+    }
+
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function pointerX(e) {
+    const rect = canvas.getBoundingClientRect();
+    return ((e.clientX - rect.left) / rect.width) * W;
+  }
+
+  let pointing = false;
+
+  canvas.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    if (over) {
+      reset();
+      return;
+    }
+    pointing = true;
+    canvas.setPointerCapture(e.pointerId);
+    aimX = pointerX(e);
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (!pointing || over) return;
+    e.preventDefault();
+    aimX = pointerX(e);
+  });
+
+  function releasePointer(e) {
+    if (!pointing) return;
+    pointing = false;
+    if (over) return;
+    aimX = pointerX(e);
+    drop();
+  }
+
+  canvas.addEventListener("pointerup", (e) => { e.preventDefault(); releasePointer(e); });
+  canvas.addEventListener("pointercancel", () => { pointing = false; });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.code === "ArrowLeft") { aimX -= 12; e.preventDefault(); }
+    else if (e.code === "ArrowRight") { aimX += 12; e.preventDefault(); }
+    else if (e.code === "Space" || e.code === "Enter") {
+      e.preventDefault();
+      if (over) reset(); else drop();
+    }
+  });
+
+  el.restart.addEventListener("click", reset);
+
+  // legend showing the whole chain
+  el.chain.innerHTML = FRUITS
+    .map((f) => `<span title="${f.name}">${f.emoji}</span>`)
+    .join('<span class="arrow">▸</span>');
+
+  setupCanvas();
+  window.addEventListener("resize", setupCanvas);
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
