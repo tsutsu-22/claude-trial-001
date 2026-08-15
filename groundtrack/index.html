@@ -225,7 +225,7 @@
   <p class="fact">ISSは地球を約90分で1周し、高度およそ400km・時速約27,600kmで飛行しています。5秒ごとに最新の位置を取得します。</p>
 
   <footer>
-    <span>Data: <a href="https://wheretheiss.at" target="_blank" rel="noopener">wheretheiss.at</a></span>
+    <span>Data: <a href="https://wheretheiss.at" target="_blank" rel="noopener">wheretheiss.at</a> · map: <a href="https://github.com/johan/world.geo.json" target="_blank" rel="noopener">johan/world.geo.json</a></span>
     <a href="../">← Toolshed</a>
   </footer>
 </div>
@@ -237,6 +237,7 @@
   var API_URL = "https://api.wheretheiss.at/v1/satellites/25544";
   var POLL_MS = 5000;
   var MAX_TRAIL = 90;
+  var MAP_URL = "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json";
 
   var canvas = document.getElementById("mapCanvas");
   var ctx = canvas.getContext("2d");
@@ -255,6 +256,27 @@
   var pollTimer = null;
   var tickTimer = null;
   var hasEverSucceeded = false;
+  var worldPolygons = [];
+
+  function loadWorldMap() {
+    fetch(MAP_URL)
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (geojson) {
+        geojson.features.forEach(function (feature) {
+          if (feature.properties && feature.properties.name === "Antarctica") return;
+          var geom = feature.geometry;
+          var polygons = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
+          polygons.forEach(function (rings) { worldPolygons.push(rings); });
+        });
+        draw();
+      })
+      .catch(function () {
+        // Map outlines are a nice-to-have; the tracker still works without them.
+      });
+  }
 
   function sizeCanvas() {
     var w = canvas.clientWidth || canvas.parentElement.clientWidth;
@@ -278,6 +300,32 @@
     var w = canvas.clientWidth;
     var h = canvas.clientHeight;
     ctx.clearRect(0, 0, w, h);
+
+    // landmasses (drawn first, underneath the grid/trail/marker)
+    if (worldPolygons.length > 0) {
+      ctx.fillStyle = "rgba(79, 209, 197, 0.09)";
+      ctx.strokeStyle = "rgba(79, 209, 197, 0.28)";
+      ctx.lineWidth = 0.75;
+      ctx.beginPath();
+      worldPolygons.forEach(function (rings) {
+        rings.forEach(function (ring) {
+          var prevLon = null;
+          ring.forEach(function (pt) {
+            var lon = pt[0], lat = pt[1];
+            var p = project(lat, lon, w, h);
+            if (prevLon === null || Math.abs(lon - prevLon) > 180) {
+              ctx.moveTo(p.x, p.y);
+            } else {
+              ctx.lineTo(p.x, p.y);
+            }
+            prevLon = lon;
+          });
+          ctx.closePath();
+        });
+      });
+      ctx.fill("evenodd");
+      ctx.stroke();
+    }
 
     // graticule
     ctx.lineWidth = 1;
@@ -431,6 +479,7 @@
   window.addEventListener("resize", sizeCanvas);
 
   sizeCanvas();
+  loadWorldMap();
   startPolling();
 })();
 </script>
