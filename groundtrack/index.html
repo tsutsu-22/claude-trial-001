@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Groundtrack</title>
+<meta name="description" content="国際宇宙ステーション(ISS)の現在位置をリアルタイムで追跡するトラッカー。" />
+<meta name="theme-color" content="#0a0e14" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛰️</text></svg>" />
+<style>
+  :root {
+    --bg: #0a0e14;
+    --panel: #10151d;
+    --panel-alt: #151b25;
+    --border: #202b36;
+    --grid: #1c2b36;
+    --grid-strong: #2f4759;
+    --text: #d7e4ea;
+    --text-dim: #7891a0;
+    --text-faint: #4c5c68;
+    --cyan: #4fd1c5;
+    --iss: #ff9d4d;
+    --good: #57c785;
+    --night: #8b93d1;
+    --error: #e2645b;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    min-height: 100vh;
+  }
+
+  .wrap { max-width: 720px; margin: 0 auto; padding: 22px 16px 40px; }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  h1 {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  h1 .mark { color: var(--cyan); }
+  header p { margin: 4px 0 0; font-size: 0.82rem; color: var(--text-dim); }
+
+  .status-pill {
+    flex: none;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    padding: 5px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .status-pill .led {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-faint);
+  }
+  .status-pill.live .led { background: var(--good); box-shadow: 0 0 6px var(--good); }
+  .status-pill.error .led { background: var(--error); box-shadow: 0 0 6px var(--error); }
+  .status-pill.error { color: var(--error); border-color: var(--error); }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px;
+    margin: 16px 0;
+  }
+  @media (max-width: 520px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 10px 12px;
+  }
+  .stat .k {
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-faint);
+  }
+  .stat .v {
+    margin-top: 3px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 1.05rem;
+  }
+  .stat .v .unit { font-size: 0.7rem; color: var(--text-dim); margin-left: 2px; }
+  .badge-day { color: var(--good); }
+  .badge-night { color: var(--night); }
+
+  .map-panel {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  canvas { display: block; width: 100%; height: auto; }
+
+  .map-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 10px;
+    background: rgba(10, 14, 20, 0.86);
+    text-align: center;
+    padding: 20px;
+  }
+  .map-overlay[hidden] { display: none; }
+  .map-overlay p { margin: 0; color: var(--text-dim); font-size: 0.86rem; max-width: 320px; }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+  .controls-left { display: flex; gap: 8px; }
+
+  button {
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel-alt);
+    color: var(--text);
+    padding: 8px 13px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--text-faint); }
+  button.primary { background: var(--cyan); color: #062320; border-color: var(--cyan); }
+  button.primary:hover { filter: brightness(1.08); }
+
+  .updated-note {
+    font-family: ui-monospace, monospace;
+    font-size: 0.74rem;
+    color: var(--text-faint);
+  }
+
+  .fact {
+    margin-top: 16px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    border-left: 2px solid var(--border);
+    padding-left: 10px;
+  }
+
+  footer {
+    margin-top: 26px;
+    font-size: 0.76rem;
+    color: var(--text-faint);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  footer a { color: var(--text-dim); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+  :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1><span class="mark">🛰️</span> Groundtrack</h1>
+      <p>国際宇宙ステーション(ISS)の現在位置をリアルタイム追跡</p>
+    </div>
+    <span class="status-pill" id="statusPill"><span class="led"></span><span id="statusText">接続中…</span></span>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="k">Latitude</div><div class="v" id="statLat">–</div></div>
+    <div class="stat"><div class="k">Longitude</div><div class="v" id="statLon">–</div></div>
+    <div class="stat"><div class="k">Altitude</div><div class="v" id="statAlt">–</div></div>
+    <div class="stat"><div class="k">Velocity</div><div class="v" id="statVel">–</div></div>
+    <div class="stat"><div class="k">Sun</div><div class="v" id="statSun">–</div></div>
+  </div>
+
+  <div class="map-panel">
+    <canvas id="mapCanvas"></canvas>
+    <div class="map-overlay" id="mapOverlay">
+      <p id="overlayText">位置情報を取得しています…</p>
+      <button class="primary" id="retryBtn" hidden>再試行</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="controls-left">
+      <button id="pauseBtn">一時停止</button>
+      <button id="refreshBtn">今すぐ更新</button>
+    </div>
+    <span class="updated-note" id="updatedNote"></span>
+  </div>
+
+  <p class="fact">ISSは地球を約90分で1周し、高度およそ400km・時速約27,600kmで飛行しています。5秒ごとに最新の位置を取得します。</p>
+
+  <footer>
+    <span>Data: <a href="https://wheretheiss.at" target="_blank" rel="noopener">wheretheiss.at</a></span>
+    <a href="../">← Toolshed</a>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var API_URL = "https://api.wheretheiss.at/v1/satellites/25544";
+  var POLL_MS = 5000;
+  var MAX_TRAIL = 90;
+
+  var canvas = document.getElementById("mapCanvas");
+  var ctx = canvas.getContext("2d");
+  var overlay = document.getElementById("mapOverlay");
+  var overlayText = document.getElementById("overlayText");
+  var retryBtn = document.getElementById("retryBtn");
+  var statusPill = document.getElementById("statusPill");
+  var statusText = document.getElementById("statusText");
+  var pauseBtn = document.getElementById("pauseBtn");
+  var refreshBtn = document.getElementById("refreshBtn");
+  var updatedNote = document.getElementById("updatedNote");
+
+  var trail = [];
+  var lastFetchAt = null;
+  var paused = false;
+  var pollTimer = null;
+  var tickTimer = null;
+  var hasEverSucceeded = false;
+
+  function sizeCanvas() {
+    var w = canvas.clientWidth || canvas.parentElement.clientWidth;
+    var h = Math.round(w * 0.62);
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.height = h + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw();
+  }
+
+  function project(lat, lon, w, h) {
+    return {
+      x: ((lon + 180) / 360) * w,
+      y: ((90 - lat) / 180) * h
+    };
+  }
+
+  function draw() {
+    var w = canvas.clientWidth;
+    var h = canvas.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+
+    // graticule
+    ctx.lineWidth = 1;
+    for (var lon = -180; lon <= 180; lon += 30) {
+      var p1 = project(90, lon, w, h);
+      ctx.strokeStyle = lon === 0 ? getVar("--grid-strong") : getVar("--grid");
+      ctx.beginPath();
+      ctx.moveTo(p1.x, 0);
+      ctx.lineTo(p1.x, h);
+      ctx.stroke();
+    }
+    for (var lat = -90; lat <= 90; lat += 30) {
+      var p2 = project(lat, -180, w, h);
+      ctx.strokeStyle = lat === 0 ? getVar("--grid-strong") : getVar("--grid");
+      ctx.beginPath();
+      ctx.moveTo(0, p2.y);
+      ctx.lineTo(w, p2.y);
+      ctx.stroke();
+    }
+
+    // axis labels
+    ctx.fillStyle = getVar("--text-faint");
+    ctx.font = "10px ui-monospace, monospace";
+    ctx.textBaseline = "top";
+    [-180, -90, 0, 90, 180].forEach(function (lon) {
+      var p = project(90, lon, w, h);
+      ctx.fillText(lon + "°", Math.min(Math.max(p.x + 3, 2), w - 26), 3);
+    });
+    ctx.textBaseline = "middle";
+    [-60, -30, 0, 30, 60].forEach(function (lat) {
+      var p = project(lat, -180, w, h);
+      ctx.fillText(lat + "°", 3, Math.min(Math.max(p.y, 8), h - 8));
+    });
+
+    // trail (skip segments that wrap across the antimeridian)
+    if (trail.length > 1) {
+      for (var i = 1; i < trail.length; i++) {
+        var a = trail[i - 1];
+        var b = trail[i];
+        if (Math.abs(b.longitude - a.longitude) > 180) continue;
+        var pa = project(a.latitude, a.longitude, w, h);
+        var pb = project(b.latitude, b.longitude, w, h);
+        var alpha = (i / trail.length) * 0.55;
+        ctx.strokeStyle = "rgba(255, 157, 77, " + alpha.toFixed(2) + ")";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(pa.x, pa.y);
+        ctx.lineTo(pb.x, pb.y);
+        ctx.stroke();
+      }
+    }
+
+    // current marker
+    if (trail.length > 0) {
+      var cur = trail[trail.length - 1];
+      var pc = project(cur.latitude, cur.longitude, w, h);
+      ctx.fillStyle = "rgba(255, 157, 77, 0.25)";
+      ctx.beginPath();
+      ctx.arc(pc.x, pc.y, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = getVar("--iss");
+      ctx.beginPath();
+      ctx.arc(pc.x, pc.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function getVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function fmtCoord(v, posLabel, negLabel) {
+    var dir = v >= 0 ? posLabel : negLabel;
+    return Math.abs(v).toFixed(2) + "° " + dir;
+  }
+
+  function setStatus(kind, text) {
+    statusPill.className = "status-pill" + (kind ? " " + kind : "");
+    statusText.textContent = text;
+  }
+
+  function render(data) {
+    document.getElementById("statLat").innerHTML = fmtCoord(data.latitude, "N", "S");
+    document.getElementById("statLon").innerHTML = fmtCoord(data.longitude, "E", "W");
+    document.getElementById("statAlt").innerHTML = data.altitude.toFixed(1) + '<span class="unit">km</span>';
+    document.getElementById("statVel").innerHTML = Math.round(data.velocity).toLocaleString() + '<span class="unit">km/h</span>';
+    var sunEl = document.getElementById("statSun");
+    if (data.visibility === "daylight") {
+      sunEl.innerHTML = "☀ Daylight";
+      sunEl.className = "v badge-day";
+    } else {
+      sunEl.innerHTML = "🌑 Eclipse";
+      sunEl.className = "v badge-night";
+    }
+    draw();
+  }
+
+  function fetchPosition() {
+    setStatus(null, "更新中…");
+    return fetch(API_URL)
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        hasEverSucceeded = true;
+        lastFetchAt = Date.now();
+        trail.push(data);
+        if (trail.length > MAX_TRAIL) trail.shift();
+        render(data);
+        overlay.hidden = true;
+        setStatus("live", "LIVE");
+      })
+      .catch(function (err) {
+        setStatus("error", "接続エラー");
+        if (!hasEverSucceeded) {
+          overlay.hidden = false;
+          overlayText.textContent = "ISSの位置情報を取得できませんでした。ネットワーク接続を確認して再試行してください。";
+          retryBtn.hidden = false;
+        }
+      });
+  }
+
+  function tickUpdatedNote() {
+    if (!lastFetchAt) return;
+    var secs = Math.round((Date.now() - lastFetchAt) / 1000);
+    updatedNote.textContent = secs <= 1 ? "たった今更新" : secs + "秒前に更新";
+  }
+
+  function startPolling() {
+    fetchPosition();
+    pollTimer = setInterval(function () {
+      if (!paused) fetchPosition();
+    }, POLL_MS);
+    tickTimer = setInterval(tickUpdatedNote, 1000);
+  }
+
+  pauseBtn.addEventListener("click", function () {
+    paused = !paused;
+    pauseBtn.textContent = paused ? "再開" : "一時停止";
+    setStatus(paused ? null : (hasEverSucceeded ? "live" : null), paused ? "一時停止中" : (hasEverSucceeded ? "LIVE" : "更新中…"));
+  });
+
+  refreshBtn.addEventListener("click", function () { fetchPosition(); });
+  retryBtn.addEventListener("click", function () {
+    overlayText.textContent = "位置情報を取得しています…";
+    retryBtn.hidden = true;
+    fetchPosition();
+  });
+
+  window.addEventListener("resize", sizeCanvas);
+
+  sizeCanvas();
+  startPolling();
+})();
+</script>
+</body>
+</html>
