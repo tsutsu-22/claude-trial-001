@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>そらとぶひよこ</title>
+<meta name="description" content="Flappy Bird風のシンプルなブラウザゲーム。クリックかスペースキーでジャンプして土管をよけよう。" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><text y=%2226%22 font-size=%2226%22>🐤</text></svg>" />
+<style>
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(180deg, #70c5ce 0%, #a8e6cf 100%);
+    font-family: "Hiragino Maru Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+    color: #333;
+  }
+
+  a.back {
+    position: absolute;
+    top: 14px;
+    left: 16px;
+    font-size: 0.85rem;
+    color: #234;
+    text-decoration: none;
+    background: rgba(255, 255, 255, 0.55);
+    padding: 5px 10px;
+    border-radius: 999px;
+  }
+  a.back:hover { background: rgba(255, 255, 255, 0.8); }
+
+  #game-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px;
+  }
+
+  h1 {
+    margin: 0 0 12px;
+    font-size: 1.6rem;
+    text-shadow: 1px 1px 0 #fff;
+  }
+
+  canvas {
+    background: #70c5ce;
+    border: 4px solid #4a3728;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    touch-action: none;
+    max-width: 90vw;
+    height: auto;
+  }
+
+  #hint {
+    margin-top: 10px;
+    font-size: 0.9rem;
+    opacity: 0.8;
+  }
+</style>
+</head>
+<body>
+  <a class="back" href="../">← Toolshed</a>
+  <div id="game-container">
+    <h1>そらとぶひよこ 🐤</h1>
+    <canvas id="game" width="400" height="600"></canvas>
+    <p id="hint">クリック / タップ / スペースキー で ジャンプ！</p>
+  </div>
+  <script>
+  (() => {
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width;
+    const H = canvas.height;
+
+    const GRAVITY = 0.45;
+    const JUMP_VELOCITY = -8;
+    const PIPE_WIDTH = 60;
+    const PIPE_GAP = 160;
+    const PIPE_SPEED = 2.6;
+    const PIPE_INTERVAL = 95; // frames between new pipes
+    const GROUND_HEIGHT = 60;
+
+    const STORAGE_KEY = "flappy-hiyoko-high-score";
+
+    const STATE = { READY: "ready", PLAYING: "playing", OVER: "over" };
+
+    let state = STATE.READY;
+    let bird;
+    let pipes;
+    let frame;
+    let score;
+    let highScore = Number(localStorage.getItem(STORAGE_KEY) || 0);
+
+    function resetGame() {
+      bird = { x: 90, y: H / 2, vy: 0, radius: 14, rotation: 0 };
+      pipes = [];
+      frame = 0;
+      score = 0;
+    }
+
+    function spawnPipe() {
+      const minTop = 40;
+      const maxTop = H - GROUND_HEIGHT - PIPE_GAP - 40;
+      const top = minTop + Math.random() * (maxTop - minTop);
+      pipes.push({ x: W, top, passed: false });
+    }
+
+    function flap() {
+      if (state === STATE.READY) {
+        state = STATE.PLAYING;
+        bird.vy = JUMP_VELOCITY;
+      } else if (state === STATE.PLAYING) {
+        bird.vy = JUMP_VELOCITY;
+      } else if (state === STATE.OVER) {
+        resetGame();
+        state = STATE.READY;
+      }
+    }
+
+    function update() {
+      if (state !== STATE.PLAYING) return;
+
+      frame++;
+      bird.vy += GRAVITY;
+      bird.y += bird.vy;
+      bird.rotation = Math.max(-0.4, Math.min(1.2, bird.vy / 10));
+
+      if (frame % PIPE_INTERVAL === 0) spawnPipe();
+
+      for (const pipe of pipes) {
+        pipe.x -= PIPE_SPEED;
+        if (!pipe.passed && pipe.x + PIPE_WIDTH < bird.x) {
+          pipe.passed = true;
+          score++;
+        }
+      }
+      pipes = pipes.filter((p) => p.x + PIPE_WIDTH > -5);
+
+      // keep the bird from flying off the top of the screen
+      if (bird.y - bird.radius < 0) {
+        bird.y = bird.radius;
+        bird.vy = Math.max(bird.vy, 0);
+      }
+
+      // collisions
+      const groundY = H - GROUND_HEIGHT;
+      if (bird.y + bird.radius >= groundY) {
+        endGame();
+        return;
+      }
+      for (const pipe of pipes) {
+        const withinX = bird.x + bird.radius > pipe.x && bird.x - bird.radius < pipe.x + PIPE_WIDTH;
+        if (withinX) {
+          const hitsTop = bird.y - bird.radius < pipe.top;
+          const hitsBottom = bird.y + bird.radius > pipe.top + PIPE_GAP;
+          if (hitsTop || hitsBottom) {
+            endGame();
+            return;
+          }
+        }
+      }
+    }
+
+    function endGame() {
+      state = STATE.OVER;
+      if (score > highScore) {
+        highScore = score;
+        localStorage.setItem(STORAGE_KEY, String(highScore));
+      }
+    }
+
+    function drawBackgroundClouds() {
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      const cloudOffset = (frame * 0.3) % (W + 80);
+      for (let i = 0; i < 3; i++) {
+        const cx = ((i * 160 - cloudOffset) % (W + 80) + (W + 80)) % (W + 80) - 40;
+        const cy = 80 + i * 90;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, 30, 16, 0, 0, Math.PI * 2);
+        ctx.ellipse(cx + 20, cy + 4, 22, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function drawPipes() {
+      ctx.fillStyle = "#4caf50";
+      ctx.strokeStyle = "#2e7d32";
+      ctx.lineWidth = 3;
+      for (const pipe of pipes) {
+        ctx.fillRect(pipe.x, 0, PIPE_WIDTH, pipe.top);
+        ctx.strokeRect(pipe.x, 0, PIPE_WIDTH, pipe.top);
+        const bottomY = pipe.top + PIPE_GAP;
+        ctx.fillRect(pipe.x, bottomY, PIPE_WIDTH, H - GROUND_HEIGHT - bottomY);
+        ctx.strokeRect(pipe.x, bottomY, PIPE_WIDTH, H - GROUND_HEIGHT - bottomY);
+      }
+    }
+
+    function drawGround() {
+      const groundY = H - GROUND_HEIGHT;
+      ctx.fillStyle = "#ded895";
+      ctx.fillRect(0, groundY, W, GROUND_HEIGHT);
+      ctx.fillStyle = "#c2b169";
+      const stripeOffset = (frame * PIPE_SPEED) % 20;
+      for (let x = -stripeOffset; x < W; x += 20) {
+        ctx.fillRect(x, groundY, 10, 8);
+      }
+    }
+
+    function drawBird() {
+      ctx.save();
+      ctx.translate(bird.x, bird.y);
+      ctx.rotate(bird.rotation);
+      ctx.fillStyle = "#ffd54f";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, bird.radius, bird.radius * 0.9, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // wing
+      ctx.fillStyle = "#ffb300";
+      ctx.beginPath();
+      ctx.ellipse(-2, 2, 7, 5, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      // eye
+      ctx.fillStyle = "#333";
+      ctx.beginPath();
+      ctx.arc(6, -4, 2, 0, Math.PI * 2);
+      ctx.fill();
+      // beak
+      ctx.fillStyle = "#ff7043";
+      ctx.beginPath();
+      ctx.moveTo(bird.radius - 2, -2);
+      ctx.lineTo(bird.radius + 8, 1);
+      ctx.lineTo(bird.radius - 2, 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawScore() {
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = 3;
+      ctx.font = "bold 36px sans-serif";
+      ctx.textAlign = "center";
+      ctx.strokeText(String(score), W / 2, 70);
+      ctx.fillText(String(score), W / 2, 70);
+    }
+
+    function drawOverlayText(lines) {
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      lines.forEach((line, i) => {
+        ctx.font = i === 0 ? "bold 28px sans-serif" : "18px sans-serif";
+        ctx.fillText(line, W / 2, H / 2 - 30 + i * 34);
+      });
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+      drawBackgroundClouds();
+      drawPipes();
+      drawGround();
+      drawBird();
+
+      if (state === STATE.PLAYING) {
+        drawScore();
+      } else if (state === STATE.READY) {
+        drawScore();
+        drawOverlayText(["そらとぶひよこ", "クリック / スペースキーで START", `ハイスコア: ${highScore}`]);
+      } else if (state === STATE.OVER) {
+        drawOverlayText(["ゲームオーバー", `スコア: ${score}　ハイスコア: ${highScore}`, "クリック / スペースキーで もういちど"]);
+      }
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    function handleInput(e) {
+      e.preventDefault();
+      flap();
+    }
+
+    canvas.addEventListener("mousedown", handleInput);
+    canvas.addEventListener("touchstart", handleInput, { passive: false });
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Space") handleInput(e);
+    });
+
+    resetGame();
+    loop();
+  })();
+  </script>
+</body>
+</html>
