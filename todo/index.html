@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Pocket Ledger</title>
+<meta name="description" content="タスクとメモをさっと書き留めて消し込める、スマホ向けのシンプルなチェックリスト。" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Pocket Ledger" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="theme-color" content="#fafaf6" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#1b1f19" media="(prefers-color-scheme: dark)" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🗒️</text></svg>" />
+<style>
+  :root {
+    --bg: #e8e9e3;
+    --card: #fafaf6;
+    --ink: #262a22;
+    --ink-soft: #6b6f63;
+    --rule: #d7d9cc;
+    --accent: #2454c4;
+    --accent-ink: #17348c;
+    --accent-tint: #e3ebfb;
+    --done: #6f8f5c;
+    --danger: #b8442f;
+    --danger-tint: #f6e6e1;
+    --shadow: 15, 20, 12;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10120f;
+      --card: #1b1f19;
+      --ink: #e7e6dd;
+      --ink-soft: #9ca093;
+      --rule: #2c3126;
+      --accent: #7da0ff;
+      --accent-ink: #c6d6ff;
+      --accent-tint: #232c42;
+      --done: #9bc17e;
+      --danger: #e38670;
+      --danger-tint: #3a241f;
+      --shadow: 0, 0, 0;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #10120f;
+    --card: #1b1f19;
+    --ink: #e7e6dd;
+    --ink-soft: #9ca093;
+    --rule: #2c3126;
+    --accent: #7da0ff;
+    --accent-ink: #c6d6ff;
+    --accent-tint: #232c42;
+    --done: #9bc17e;
+    --danger: #e38670;
+    --danger-tint: #3a241f;
+    --shadow: 0, 0, 0;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+
+  .app {
+    width: 100%;
+    max-width: 440px;
+    min-height: 100vh;
+    background: var(--card);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 0 40px rgba(var(--shadow), 0.12);
+    position: relative;
+  }
+
+  .spine {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    background: linear-gradient(180deg, var(--accent), var(--done));
+    opacity: 0.55;
+  }
+
+  header {
+    padding: 28px 24px 18px 30px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .dateline {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  h1 {
+    font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    font-weight: 600;
+    font-size: 1.9rem;
+    margin: 4px 0 0;
+    text-wrap: balance;
+    letter-spacing: 0.01em;
+  }
+
+  .tally {
+    margin-top: 10px;
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+    color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .tally button {
+    border: none;
+    background: none;
+    font-family: inherit;
+    font-size: inherit;
+    color: var(--accent-ink);
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    opacity: 0.85;
+  }
+  .tally button:hover { opacity: 1; }
+  .tally button:disabled { visibility: hidden; }
+
+  main {
+    flex: 1;
+    padding: 6px 12px 0 18px;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent,
+      transparent 47px,
+      var(--rule) 47px,
+      var(--rule) 48px
+    );
+    overflow-y: auto;
+  }
+
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 48px;
+    padding-right: 6px;
+  }
+
+  .check {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1.5px solid var(--ink-soft);
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--card);
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+  .check svg { width: 14px; height: 14px; opacity: 0; transition: opacity 0.15s ease; }
+  .check[aria-checked="true"] {
+    background: var(--done);
+    border-color: var(--done);
+  }
+  .check[aria-checked="true"] svg { opacity: 1; }
+
+  .entry-text {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 0.98rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  li[data-done="true"] .entry-text {
+    color: var(--ink-soft);
+    text-decoration: line-through;
+    text-decoration-color: var(--done);
+  }
+
+  .entry-time {
+    flex: none;
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 0.68rem;
+    color: var(--ink-soft);
+    opacity: 0.7;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .remove {
+    flex: none;
+    width: 30px;
+    height: 30px;
+    border: none;
+    background: none;
+    color: var(--ink-soft);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    border-radius: 6px;
+  }
+  .remove:hover { color: var(--danger); background: var(--danger-tint); }
+
+  .empty {
+    font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    font-style: italic;
+    color: var(--ink-soft);
+    padding: 18px 6px;
+    font-size: 1.05rem;
+  }
+
+  .composer {
+    flex: none;
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    gap: 8px;
+    padding: 14px;
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+    background: var(--card);
+    border-top: 1px solid var(--rule);
+  }
+
+  .composer input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 0.98rem;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  .composer input::placeholder { color: var(--ink-soft); opacity: 0.8; }
+
+  .composer button.add {
+    flex: none;
+    width: 46px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: var(--card);
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .composer button.add:active { transform: scale(0.96); }
+
+  footer {
+    text-align: center;
+    padding: 10px 14px;
+    font-size: 0.72rem;
+  }
+  footer a { color: var(--ink-soft); }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="spine" aria-hidden="true"></div>
+  <header>
+    <div class="dateline" id="dateline"></div>
+    <h1>Pocket Ledger</h1>
+    <div class="tally">
+      <span id="tallyText">0 open</span>
+      <button id="clearDone" disabled>clear done</button>
+    </div>
+  </header>
+  <main>
+    <ul id="list"></ul>
+    <p class="empty" id="emptyMsg" hidden>Nothing logged yet. Write the first line below.</p>
+  </main>
+  <form class="composer" id="composer">
+    <input id="entryInput" type="text" placeholder="Add a task or note…" autocomplete="off" maxlength="200" />
+    <button class="add" type="submit" aria-label="Add entry">+</button>
+  </form>
+  <footer><a href="../">← Toolshed</a></footer>
+</div>
+
+<script>
+  (function () {
+    var STORAGE_KEY = "pocket-ledger-items";
+    var list = document.getElementById("list");
+    var emptyMsg = document.getElementById("emptyMsg");
+    var tallyText = document.getElementById("tallyText");
+    var clearDoneBtn = document.getElementById("clearDone");
+    var composer = document.getElementById("composer");
+    var input = document.getElementById("entryInput");
+    var dateline = document.getElementById("dateline");
+
+    dateline.textContent = new Date().toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric"
+    });
+
+    function load() {
+      try {
+        var raw = localStorage.getItem(STORAGE_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function save(items) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      } catch (e) {}
+    }
+
+    var items = load();
+
+    function formatTime(ts) {
+      return new Date(ts).toLocaleTimeString(undefined, {
+        hour: "numeric",
+        minute: "2-digit"
+      });
+    }
+
+    function render() {
+      list.innerHTML = "";
+      var sorted = items.slice().sort(function (a, b) {
+        if (a.done !== b.done) return a.done ? 1 : -1;
+        return a.ts - b.ts;
+      });
+
+      sorted.forEach(function (item) {
+        var li = document.createElement("li");
+        li.dataset.done = String(item.done);
+
+        var check = document.createElement("button");
+        check.type = "button";
+        check.className = "check";
+        check.setAttribute("role", "checkbox");
+        check.setAttribute("aria-checked", String(item.done));
+        check.setAttribute("aria-label", item.done ? "Mark not done" : "Mark done");
+        check.innerHTML =
+          '<svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.2 12L13 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        check.addEventListener("click", function () {
+          item.done = !item.done;
+          save(items);
+          render();
+        });
+
+        var text = document.createElement("span");
+        text.className = "entry-text";
+        text.textContent = item.text;
+
+        var time = document.createElement("span");
+        time.className = "entry-time";
+        time.textContent = formatTime(item.ts);
+
+        var remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "remove";
+        remove.setAttribute("aria-label", "Delete entry");
+        remove.textContent = "×";
+        remove.addEventListener("click", function () {
+          items = items.filter(function (i) {
+            return i.id !== item.id;
+          });
+          save(items);
+          render();
+        });
+
+        li.appendChild(check);
+        li.appendChild(text);
+        li.appendChild(time);
+        li.appendChild(remove);
+        list.appendChild(li);
+      });
+
+      var openCount = items.filter(function (i) {
+        return !i.done;
+      }).length;
+      var doneCount = items.length - openCount;
+      tallyText.textContent =
+        openCount + " open" + (doneCount ? " · " + doneCount + " done" : "");
+      clearDoneBtn.disabled = doneCount === 0;
+      emptyMsg.hidden = items.length !== 0;
+    }
+
+    composer.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var text = input.value.trim();
+      if (!text) return;
+      items.push({ id: Date.now() + "-" + Math.random(), text: text, done: false, ts: Date.now() });
+      save(items);
+      input.value = "";
+      render();
+      input.focus();
+    });
+
+    clearDoneBtn.addEventListener("click", function () {
+      items = items.filter(function (i) {
+        return !i.done;
+      });
+      save(items);
+      render();
+    });
+
+    render();
+  })();
+</script>
+</body>
+</html>
