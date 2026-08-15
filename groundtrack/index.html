@@ -222,7 +222,7 @@
     <span class="updated-note" id="updatedNote"></span>
   </div>
 
-  <p class="fact">ISSは地球を約90分で1周し、高度およそ400km・時速約27,600kmで飛行しています。過去30分の軌跡を表示し、5秒ごとに最新の位置を取得します。</p>
+  <p class="fact">ISSは地球を約90分で1周し、高度およそ400km・時速約27,600kmで飛行しています。過去60分の軌跡を10分間隔の経由点で表示し、現在位置は5秒ごとに更新します。</p>
 
   <footer>
     <span>Data: <a href="https://wheretheiss.at" target="_blank" rel="noopener">wheretheiss.at</a> · map: <a href="https://github.com/johan/world.geo.json" target="_blank" rel="noopener">johan/world.geo.json</a></span>
@@ -237,8 +237,10 @@
   var API_URL = "https://api.wheretheiss.at/v1/satellites/25544";
   var HISTORY_URL = "https://api.wheretheiss.at/v1/satellites/25544/positions";
   var POLL_MS = 5000;
-  var TRAIL_MINUTES = 30;
+  var TRAIL_MINUTES = 60;
+  var TRAIL_INTERVAL_MINUTES = 10;
   var TRAIL_WINDOW_MS = TRAIL_MINUTES * 60 * 1000;
+  var TRAIL_INTERVAL_MS = TRAIL_INTERVAL_MINUTES * 60 * 1000;
   var MAP_URL = "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json";
 
   var canvas = document.getElementById("mapCanvas");
@@ -253,6 +255,7 @@
   var updatedNote = document.getElementById("updatedNote");
 
   var trail = [];
+  var current = null;
   var lastFetchAt = null;
   var paused = false;
   var pollTimer = null;
@@ -362,15 +365,21 @@
       ctx.fillText(lat + "°", 3, Math.min(Math.max(p.y, 8), h - 8));
     });
 
-    // trail (skip segments that wrap across the antimeridian)
-    if (trail.length > 1) {
-      for (var i = 1; i < trail.length; i++) {
-        var a = trail[i - 1];
-        var b = trail[i];
+    // waypoints (10-min spaced trail) plus the live current position as the trailing tip
+    var displayList = trail.slice();
+    if (current && (displayList.length === 0 || current.timestamp !== displayList[displayList.length - 1].timestamp)) {
+      displayList.push(current);
+    }
+
+    // connecting lines (skip segments that wrap across the antimeridian)
+    if (displayList.length > 1) {
+      for (var i = 1; i < displayList.length; i++) {
+        var a = displayList[i - 1];
+        var b = displayList[i];
         if (Math.abs(b.longitude - a.longitude) > 180) continue;
         var pa = project(a.latitude, a.longitude, w, h);
         var pb = project(b.latitude, b.longitude, w, h);
-        var alpha = (i / trail.length) * 0.55;
+        var alpha = (i / displayList.length) * 0.55;
         ctx.strokeStyle = "rgba(255, 157, 77, " + alpha.toFixed(2) + ")";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
@@ -380,25 +389,27 @@
       }
     }
 
-    // oldest trail point: mark it and label how long ago it was
-    if (trail.length > 1) {
-      var oldest = trail[0];
-      var po = project(oldest.latitude, oldest.longitude, w, h);
-      var ageMin = Math.round((Date.now() / 1000 - oldest.timestamp) / 60);
+    // a small dot at each past waypoint, plus an age label on the oldest one
+    for (var j = 0; j < displayList.length - 1; j++) {
+      var wp = displayList[j];
+      var pw = project(wp.latitude, wp.longitude, w, h);
       ctx.fillStyle = "rgba(255, 157, 77, 0.55)";
       ctx.beginPath();
-      ctx.arc(po.x, po.y, 2.5, 0, Math.PI * 2);
+      ctx.arc(pw.x, pw.y, 2.5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = getVar("--text-faint");
-      ctx.font = "10px ui-monospace, monospace";
-      ctx.textBaseline = "middle";
-      var labelX = Math.min(Math.max(po.x + 7, 2), w - 60);
-      ctx.fillText("-" + ageMin + "分", labelX, po.y);
+      if (j === 0) {
+        var ageMin = Math.round((Date.now() / 1000 - wp.timestamp) / 60);
+        ctx.fillStyle = getVar("--text-faint");
+        ctx.font = "10px ui-monospace, monospace";
+        ctx.textBaseline = "middle";
+        var labelX = Math.min(Math.max(pw.x + 7, 2), w - 60);
+        ctx.fillText("-" + ageMin + "分", labelX, pw.y);
+      }
     }
 
-    // current marker
-    if (trail.length > 0) {
-      var cur = trail[trail.length - 1];
+    // current marker (live position, updates every poll regardless of waypoint cadence)
+    if (displayList.length > 0) {
+      var cur = displayList[displayList.length - 1];
       var pc = project(cur.latitude, cur.longitude, w, h);
       ctx.fillStyle = "rgba(255, 157, 77, 0.25)";
       ctx.beginPath();
@@ -442,7 +453,11 @@
   }
 
   function pruneTrail() {
-    var cutoff = Date.now() / 1000 - TRAIL_WINDOW_MS / 1000;
+    // A small grace buffer keeps the oldest requested waypoint (exactly
+    // TRAIL_MINUTES old at fetch time) from being evicted moments later
+    // just because a little wall-clock time has passed since then.
+    var graceMs = 90 * 1000;
+    var cutoff = (Date.now() - TRAIL_WINDOW_MS - graceMs) / 1000;
     while (trail.length > 0 && trail[0].timestamp < cutoff) trail.shift();
   }
 
@@ -456,8 +471,12 @@
       .then(function (data) {
         hasEverSucceeded = true;
         lastFetchAt = Date.now();
-        trail.push(data);
-        pruneTrail();
+        current = data;
+        var lastWaypoint = trail[trail.length - 1];
+        if (!lastWaypoint || (data.timestamp - lastWaypoint.timestamp) * 1000 >= TRAIL_INTERVAL_MS) {
+          trail.push(data);
+          pruneTrail();
+        }
         render(data);
         overlay.hidden = true;
         setStatus("live", "LIVE");
@@ -475,7 +494,7 @@
   function fetchHistory() {
     var nowSec = Math.floor(Date.now() / 1000);
     var timestamps = [];
-    for (var m = TRAIL_MINUTES - 1; m >= 1; m--) {
+    for (var m = TRAIL_MINUTES; m >= TRAIL_INTERVAL_MINUTES; m -= TRAIL_INTERVAL_MINUTES) {
       timestamps.push(nowSec - m * 60);
     }
     return fetch(HISTORY_URL + "?timestamps=" + timestamps.join(",") + "&units=kilometers")
