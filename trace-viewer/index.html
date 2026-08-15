@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Threadline</title>
+<meta name="description" content="Claudeのagentセッション(サブエージェント/スキル/ツール呼び出し)をツリーとタイムラインで可視化するビューア。" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧵</text></svg>" />
+<style>
+  :root {
+    --bg: #12151a;
+    --panel: #171b21;
+    --panel-alt: #1d232c;
+    --border: #262c37;
+    --text: #e7eaf0;
+    --text-dim: #8992a3;
+    --text-faint: #565e6f;
+    --accent: #d9a441;
+    --accent-tint: rgba(217, 164, 65, 0.16);
+
+    --c-user: #8b93a8;
+    --c-assistant: #5b8fd6;
+    --c-tool: #d9a441;
+    --c-skill: #45b39d;
+    --c-subagent: #9b6fd1;
+    --c-system: #5c6270;
+    --c-error: #d1554a;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    min-height: 100vh;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 20px 16px 48px;
+  }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .title-block h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .title-block h1 .mark { color: var(--accent); }
+  .title-block p {
+    margin: 4px 0 0;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  button, .btn {
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel-alt);
+    color: var(--text);
+    padding: 9px 14px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  button:hover, .btn:hover { border-color: var(--text-faint); }
+  button.primary {
+    background: var(--accent);
+    color: #1a1305;
+    border-color: var(--accent);
+  }
+  button.primary:hover { filter: brightness(1.08); }
+  input[type="file"] { display: none; }
+
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 22px;
+    padding: 14px 2px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 14px;
+  }
+  .stat { display: flex; flex-direction: column; gap: 2px; }
+  .stat .k {
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+  }
+  .stat .v {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 1.05rem;
+  }
+  .skip-note {
+    font-size: 0.78rem;
+    color: var(--c-error);
+    margin: -4px 0 14px;
+  }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    padding: 6px 4px;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab:hover { border-color: var(--border); }
+  .tab.active:hover { border-bottom-color: var(--accent); }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 16px;
+    align-items: start;
+  }
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .view {
+    max-height: 62vh;
+    overflow-y: auto;
+  }
+  .view[hidden] { display: none; }
+
+  /* --- tree --- */
+  .node-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.02);
+  }
+  .node-row:hover { background: var(--panel-alt); }
+  .node-row.selected { background: var(--accent-tint); }
+  .node-row .toggle {
+    width: 12px;
+    flex: none;
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 0.7rem;
+  }
+  .node-row .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex: none;
+  }
+  .node-row .label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.86rem;
+  }
+  .node-row .type-tag {
+    flex: none;
+    font-size: 0.62rem;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .node-row .dur {
+    flex: none;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    min-width: 42px;
+    text-align: right;
+  }
+
+  /* --- timeline --- */
+  .tl-axis {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 10px 4px 230px;
+    font-size: 0.68rem;
+    color: var(--text-faint);
+    font-family: ui-monospace, monospace;
+    border-bottom: 1px solid var(--border);
+  }
+  .tl-row {
+    display: flex;
+    align-items: center;
+    height: 26px;
+    padding: 0 10px;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.02);
+  }
+  .tl-row:hover { background: var(--panel-alt); }
+  .tl-row.selected { background: var(--accent-tint); }
+  .tl-label {
+    width: 220px;
+    flex: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, monospace;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    padding-right: 8px;
+  }
+  .tl-track {
+    flex: 1;
+    position: relative;
+    height: 12px;
+    background: linear-gradient(to right, transparent, transparent);
+    border-bottom: 1px dotted var(--border);
+  }
+  .tl-bar {
+    position: absolute;
+    top: 2px;
+    height: 8px;
+    border-radius: 3px;
+    min-width: 3px;
+  }
+  .tl-point {
+    position: absolute;
+    top: 1px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    transform: translateX(-50%) rotate(45deg);
+  }
+
+  /* --- detail panel --- */
+  .detail { padding: 16px; max-height: 76vh; overflow-y: auto; }
+  .detail .empty { color: var(--text-faint); font-size: 0.88rem; }
+  .detail .badge {
+    display: inline-block;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 700;
+  }
+  .detail h2 {
+    font-size: 1rem;
+    margin: 10px 0 2px;
+    font-family: ui-monospace, monospace;
+    word-break: break-word;
+  }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 12px;
+    margin: 12px 0;
+    font-size: 0.8rem;
+  }
+  .meta-grid .k { color: var(--text-faint); }
+  .meta-grid .v { font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .detail-section { margin-top: 14px; }
+  .detail-section .k {
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    margin-bottom: 4px;
+  }
+  .detail pre {
+    margin: 0;
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 240px;
+    overflow-y: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 64px 20px;
+    color: var(--text-dim);
+  }
+  .empty-state .icon { font-size: 2.2rem; margin-bottom: 10px; }
+  .empty-state p { max-width: 420px; margin: 6px auto 18px; font-size: 0.9rem; }
+  .empty-state .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+  footer {
+    margin-top: 24px;
+    font-size: 0.78rem;
+    color: var(--text-faint);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  footer a { color: var(--text-dim); }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title-block">
+      <h1><span class="mark">🧵</span> Threadline</h1>
+      <p>Claude agentセッション(サブエージェント / スキル / ツール呼び出し)のトレースビューア</p>
+    </div>
+    <div class="controls">
+      <button class="btn" id="demoBtn">デモを見る</button>
+      <label class="btn primary" for="fileInput">.jsonlを読み込む</label>
+      <input type="file" id="fileInput" accept=".jsonl,.json,.txt" />
+    </div>
+  </header>
+
+  <div id="statsBar" hidden>
+    <div class="stats">
+      <div class="stat"><span class="k">Events</span><span class="v" id="statEvents">0</span></div>
+      <div class="stat"><span class="k">Tool calls</span><span class="v" id="statTools">0</span></div>
+      <div class="stat"><span class="k">Subagents</span><span class="v" id="statSubagents">0</span></div>
+      <div class="stat"><span class="k">Skills</span><span class="v" id="statSkills">0</span></div>
+      <div class="stat"><span class="k">Duration</span><span class="v" id="statDuration">–</span></div>
+    </div>
+    <p class="skip-note" id="skipNote" hidden></p>
+  </div>
+
+  <div id="mainArea">
+    <div class="empty-state" id="emptyState">
+      <div class="icon">🧵</div>
+      <p>セッションのJSONLファイルを読み込むと、ツール呼び出しやサブエージェントの流れをツリーとタイムラインで確認できます。まずはデモデータで試せます。</p>
+      <div class="row">
+        <button class="btn primary" id="demoBtn2">デモを見る</button>
+        <label class="btn" for="fileInput2">.jsonlを読み込む</label>
+        <input type="file" id="fileInput2" accept=".jsonl,.json,.txt" />
+      </div>
+      <p style="font-size:0.75rem;margin-top:18px;">読み込んだファイルはブラウザ内でのみ処理され、どこにも送信されません。</p>
+    </div>
+
+    <div id="dataArea" hidden>
+      <div class="tabs">
+        <button class="tab active" data-tab="tree">Tree</button>
+        <button class="tab" data-tab="timeline">Timeline</button>
+      </div>
+      <div class="layout">
+        <div class="panel">
+          <div class="view" id="treeView"></div>
+          <div class="view" id="timelineView" hidden>
+            <div class="tl-axis" id="tlAxis"></div>
+            <div id="tlRows"></div>
+          </div>
+        </div>
+        <div class="panel detail" id="detail">
+          <p class="empty">行をクリックすると詳細が表示されます。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span>対応形式: Claude Code風のJSONLトランスクリプト(推定パース)。未知の形式は簡易表示にフォールバックします。</span>
+    <a href="../">← claude-trial-001 tools</a>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var TYPE_COLOR = {
+    user: "var(--c-user)",
+    assistant: "var(--c-assistant)",
+    tool: "var(--c-tool)",
+    skill: "var(--c-skill)",
+    subagent: "var(--c-subagent)",
+    system: "var(--c-system)"
+  };
+  var SUBAGENT_NAMES = ["Task", "Agent"];
+  var SKILL_NAMES = ["Skill"];
+
+  var DEMO_JSONL = [
+    {type:"user",uuid:"u1",timestamp:"2026-08-15T09:00:00.000Z",message:{role:"user",content:[{type:"text",text:"ログイン機能のバグを直して、テストも書いて"}]}},
+    {type:"assistant",uuid:"u2",timestamp:"2026-08-15T09:00:01.200Z",message:{role:"assistant",content:[{type:"text",text:"了解です。まず該当コードを確認します。"}]}},
+    {type:"assistant",uuid:"u3",timestamp:"2026-08-15T09:00:01.800Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_1",name:"Grep",input:{pattern:"expiresAt",path:"src/auth"}}]}},
+    {type:"user",uuid:"u4",timestamp:"2026-08-15T09:00:02.050Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_1",content:"src/auth/session.js:42: if (now < token.expiresAt) {"}]}},
+    {type:"assistant",uuid:"u5",timestamp:"2026-08-15T09:00:02.400Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_2",name:"Read",input:{file_path:"src/auth/session.js"}}]}},
+    {type:"user",uuid:"u6",timestamp:"2026-08-15T09:00:02.900Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_2",content:"...42行目: if (now < token.expiresAt) { ... }"}]}},
+    {type:"assistant",uuid:"u7",timestamp:"2026-08-15T09:00:03.600Z",message:{role:"assistant",content:[{type:"text",text:"原因が分かりました。有効期限の比較が逆になっています。修正します。"}]}},
+    {type:"assistant",uuid:"u8",timestamp:"2026-08-15T09:00:03.900Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_3",name:"Edit",input:{file_path:"src/auth/session.js",old_string:"if (now < token.expiresAt)",new_string:"if (now > token.expiresAt)"}}]}},
+    {type:"user",uuid:"u9",timestamp:"2026-08-15T09:00:04.350Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_3",content:"The file src/auth/session.js has been updated."}]}},
+    {type:"assistant",uuid:"u10",timestamp:"2026-08-15T09:00:04.700Z",message:{role:"assistant",content:[{type:"text",text:"修正できました。次にリグレッションテストを書くため、サブエージェントに依頼します。"}]}},
+    {type:"assistant",uuid:"u11",timestamp:"2026-08-15T09:00:05.000Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_4",name:"Task",input:{subagent_type:"general-purpose",description:"Write regression tests for the auth expiry fix"}}]}},
+
+    {type:"user",uuid:"s1",isSidechain:true,timestamp:"2026-08-15T09:00:05.300Z",message:{role:"user",content:[{type:"text",text:"Write regression tests for the auth expiry fix in src/auth/session.js"}]}},
+    {type:"assistant",uuid:"s2",isSidechain:true,timestamp:"2026-08-15T09:00:06.000Z",message:{role:"assistant",content:[{type:"text",text:"対象ファイルとテスト構成を確認します。"}]}},
+    {type:"assistant",uuid:"s3",isSidechain:true,timestamp:"2026-08-15T09:00:06.200Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_5",name:"Read",input:{file_path:"src/auth/session.test.js"}}]}},
+    {type:"user",uuid:"s4",isSidechain:true,timestamp:"2026-08-15T09:00:06.550Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_5",content:"(empty - no existing test file)"}]}},
+    {type:"assistant",uuid:"s5",isSidechain:true,timestamp:"2026-08-15T09:00:07.100Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_6",name:"Skill",input:{skill:"code-review"}}]}},
+    {type:"user",uuid:"s6",isSidechain:true,timestamp:"2026-08-15T09:00:08.400Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_6",content:"No issues found in the proposed fix."}]}},
+    {type:"assistant",uuid:"s7",isSidechain:true,timestamp:"2026-08-15T09:00:08.700Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_7",name:"Write",input:{file_path:"src/auth/session.test.js",content:"describe('session expiry', () => { /* ... */ })"}}]}},
+    {type:"user",uuid:"s8",isSidechain:true,timestamp:"2026-08-15T09:00:09.500Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_7",content:"File created: src/auth/session.test.js"}]}},
+    {type:"assistant",uuid:"s9",isSidechain:true,timestamp:"2026-08-15T09:00:09.800Z",message:{role:"assistant",content:[{type:"text",text:"有効期限切れ/有効なトークンの2パターンをカバーするテストを追加しました。"}]}},
+
+    {type:"user",uuid:"u12",timestamp:"2026-08-15T09:00:10.100Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_4",content:"Subagent finished: added src/auth/session.test.js with 2 test cases."}]}},
+    {type:"assistant",uuid:"u13",timestamp:"2026-08-15T09:00:10.400Z",message:{role:"assistant",content:[{type:"text",text:"修正とテストが完了しました。テストを実行します。"}]}},
+    {type:"assistant",uuid:"u14",timestamp:"2026-08-15T09:00:10.700Z",message:{role:"assistant",content:[{type:"tool_use",id:"toolu_8",name:"Bash",input:{command:"npm test src/auth/session.test.js"}}]}},
+    {type:"user",uuid:"u15",timestamp:"2026-08-15T09:00:13.900Z",message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_8",content:"PASS src/auth/session.test.js\\n2 passed, 0 failed"}]}},
+    {type:"assistant",uuid:"u16",timestamp:"2026-08-15T09:00:14.200Z",message:{role:"assistant",content:[{type:"text",text:"全テストが成功しました。ログインのバグ修正とテスト追加、完了です。"}]}}
+  ].map(function (o) { return JSON.stringify(o); }).join("\n");
+
+  var state = { nodesById: {}, order: [], collapsed: new Set(), selected: null, sessionStart: 0, sessionEnd: 0 };
+
+  function fmtDuration(ms) {
+    if (ms === null || ms === undefined) return "—";
+    if (ms < 1000) return Math.round(ms) + "ms";
+    return (ms / 1000).toFixed(ms < 10000 ? 2 : 1) + "s";
+  }
+
+  function truncate(str, n) {
+    if (!str) return "";
+    str = String(str).replace(/\s+/g, " ").trim();
+    return str.length > n ? str.slice(0, n - 1) + "…" : str;
+  }
+
+  function textFromContent(content) {
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      return content.map(function (c) {
+        if (typeof c === "string") return c;
+        if (c && c.type === "text") return c.text;
+        return JSON.stringify(c);
+      }).join(" ");
+    }
+    return JSON.stringify(content);
+  }
+
+  function parseAndBuild(text) {
+    var lines = text.split("\n");
+    var raw = [];
+    var skipped = 0;
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      if (!line) continue;
+      try {
+        raw.push({ idx: i, obj: JSON.parse(line) });
+      } catch (e) {
+        skipped++;
+      }
+    }
+
+    var nodesById = { root: { id: "root", parent: null, type: "system", label: "Session", children: [] } };
+    var order = [];
+    var contextStack = ["root"];
+    var pendingSubagent = {};
+    var pendingTool = {};
+    var syntheticCounter = 0;
+
+    function addNode(node) {
+      node.children = [];
+      nodesById[node.id] = node;
+      order.push(node.id);
+      var parent = nodesById[node.parent];
+      if (parent) parent.children.push(node.id);
+    }
+
+    function tsOf(entry) {
+      var t = entry.timestamp ? Date.parse(entry.timestamp) : NaN;
+      if (isNaN(t)) {
+        syntheticCounter += 500;
+        return { ts: syntheticCounter, synthetic: true };
+      }
+      return { ts: t, synthetic: false };
+    }
+
+    raw.forEach(function (item) {
+      var entry = item.obj;
+      var msg = entry.message;
+      var content = msg && msg.content;
+      var tsInfo = tsOf(entry);
+      var currentParent = contextStack[contextStack.length - 1];
+
+      if (Array.isArray(content)) {
+        content.forEach(function (block, bi) {
+          var nid = (entry.uuid || "L" + item.idx) + "-" + bi;
+          if (block.type === "text") {
+            addNode({
+              id: nid, parent: contextStack[contextStack.length - 1],
+              type: msg.role === "assistant" ? "assistant" : "user",
+              label: truncate(block.text, 90), detail: block.text,
+              ts: tsInfo.ts, synthetic: tsInfo.synthetic, duration: null
+            });
+          } else if (block.type === "tool_use") {
+            var isSubagent = SUBAGENT_NAMES.indexOf(block.name) !== -1;
+            var isSkill = SKILL_NAMES.indexOf(block.name) !== -1;
+            var label = block.name;
+            if (isSkill && block.input && block.input.skill) label = "Skill: " + block.input.skill;
+            else if (isSubagent && block.input && block.input.description) label = block.name + ": " + truncate(block.input.description, 60);
+            var node = {
+              id: nid, parent: contextStack[contextStack.length - 1],
+              type: isSubagent ? "subagent" : (isSkill ? "skill" : "tool"),
+              name: block.name, label: label, input: block.input,
+              ts: tsInfo.ts, synthetic: tsInfo.synthetic, duration: null, output: null
+            };
+            addNode(node);
+            if (isSubagent) {
+              contextStack.push(nid);
+              pendingSubagent[block.id] = nid;
+            } else {
+              pendingTool[block.id] = nid;
+            }
+          } else if (block.type === "tool_result") {
+            var targetId = pendingSubagent[block.tool_use_id];
+            var isSub = !!targetId;
+            if (!targetId) targetId = pendingTool[block.tool_use_id];
+            if (targetId && nodesById[targetId]) {
+              var n = nodesById[targetId];
+              n.duration = tsInfo.ts - n.ts;
+              n.output = block.content;
+              if (block.is_error) n.error = true;
+              if (isSub) {
+                var pos = contextStack.indexOf(targetId);
+                if (pos !== -1) contextStack.splice(pos, 1);
+                delete pendingSubagent[block.tool_use_id];
+              } else {
+                delete pendingTool[block.tool_use_id];
+              }
+            }
+          }
+        });
+      } else if (entry.type) {
+        var nid2 = entry.uuid || "L" + item.idx;
+        addNode({
+          id: nid2, parent: currentParent,
+          type: ["user", "assistant", "system"].indexOf(entry.type) !== -1 ? entry.type : "system",
+          label: truncate(entry.type + (entry.subtype ? ":" + entry.subtype : ""), 90),
+          detail: entry,
+          ts: tsInfo.ts, synthetic: tsInfo.synthetic, duration: null
+        });
+      } else {
+        skipped++;
+      }
+    });
+
+    var tsAll = order.map(function (id) { return nodesById[id].ts; });
+    var start = tsAll.length ? Math.min.apply(null, tsAll) : 0;
+    var end = tsAll.length ? Math.max.apply(null, order.map(function (id) {
+      var n = nodesById[id];
+      return n.ts + (n.duration || 0);
+    })) : 0;
+
+    return { nodesById: nodesById, order: order, skipped: skipped, sessionStart: start, sessionEnd: end };
+  }
+
+  function loadData(text) {
+    var built = parseAndBuild(text);
+    state = built;
+    state.collapsed = new Set();
+    state.selected = null;
+
+    document.getElementById("emptyState").hidden = true;
+    document.getElementById("dataArea").hidden = false;
+    document.getElementById("statsBar").hidden = false;
+
+    var events = state.order.length;
+    var tools = 0, subagents = 0, skills = 0;
+    state.order.forEach(function (id) {
+      var t = state.nodesById[id].type;
+      if (t === "tool") tools++;
+      if (t === "subagent") subagents++;
+      if (t === "skill") skills++;
+    });
+    document.getElementById("statEvents").textContent = events;
+    document.getElementById("statTools").textContent = tools;
+    document.getElementById("statSubagents").textContent = subagents;
+    document.getElementById("statSkills").textContent = skills;
+    document.getElementById("statDuration").textContent = fmtDuration(state.sessionEnd - state.sessionStart);
+
+    var skipNote = document.getElementById("skipNote");
+    if (state.skipped > 0) {
+      skipNote.hidden = false;
+      skipNote.textContent = state.skipped + " 行を解析できず読み飛ばしました。";
+    } else {
+      skipNote.hidden = true;
+    }
+
+    renderTree();
+    renderTimeline();
+    renderDetail(null);
+  }
+
+  function renderTree() {
+    var container = document.getElementById("treeView");
+    container.innerHTML = "";
+    function walk(id, depth) {
+      var node = state.nodesById[id];
+      if (id !== "root") {
+        var row = document.createElement("div");
+        row.className = "node-row" + (state.selected === id ? " selected" : "");
+        row.style.paddingLeft = (10 + depth * 16) + "px";
+        row.dataset.id = id;
+
+        var hasChildren = node.children.length > 0;
+        var toggle = document.createElement("span");
+        toggle.className = "toggle";
+        toggle.textContent = hasChildren ? (state.collapsed.has(id) ? "▸" : "▾") : "";
+        if (hasChildren) {
+          toggle.addEventListener("click", function (e) {
+            e.stopPropagation();
+            if (state.collapsed.has(id)) state.collapsed.delete(id); else state.collapsed.add(id);
+            renderTree();
+            renderTimeline();
+          });
+        }
+
+        var dot = document.createElement("span");
+        dot.className = "dot";
+        dot.style.background = node.error ? "var(--c-error)" : TYPE_COLOR[node.type];
+
+        var label = document.createElement("span");
+        label.className = "label";
+        label.textContent = node.label;
+
+        var typeTag = document.createElement("span");
+        typeTag.className = "type-tag";
+        typeTag.textContent = node.type;
+
+        var dur = document.createElement("span");
+        dur.className = "dur";
+        dur.textContent = fmtDuration(node.duration);
+
+        row.appendChild(toggle);
+        row.appendChild(dot);
+        row.appendChild(label);
+        row.appendChild(typeTag);
+        row.appendChild(dur);
+        row.addEventListener("click", function () { selectNode(id); });
+        container.appendChild(row);
+      }
+      if (id === "root" || !state.collapsed.has(id)) {
+        node.children.forEach(function (cid) { walk(cid, id === "root" ? 0 : depth + 1); });
+      }
+    }
+    walk("root", 0);
+  }
+
+  function visibleFlatList() {
+    var out = [];
+    function walk(id, depth) {
+      var node = state.nodesById[id];
+      if (id !== "root") out.push({ id: id, depth: depth });
+      if (id === "root" || !state.collapsed.has(id)) {
+        node.children.forEach(function (cid) { walk(cid, id === "root" ? 0 : depth + 1); });
+      }
+    }
+    walk("root", 0);
+    return out;
+  }
+
+  function renderTimeline() {
+    var rowsEl = document.getElementById("tlRows");
+    var axisEl = document.getElementById("tlAxis");
+    rowsEl.innerHTML = "";
+    axisEl.innerHTML = "";
+
+    var total = Math.max(state.sessionEnd - state.sessionStart, 1);
+    [0, 0.25, 0.5, 0.75, 1].forEach(function (f) {
+      var tick = document.createElement("span");
+      tick.textContent = fmtDuration(total * f);
+      axisEl.appendChild(tick);
+    });
+
+    visibleFlatList().forEach(function (item) {
+      var node = state.nodesById[item.id];
+      var row = document.createElement("div");
+      row.className = "tl-row" + (state.selected === item.id ? " selected" : "");
+      row.dataset.id = item.id;
+
+      var label = document.createElement("span");
+      label.className = "tl-label";
+      label.style.paddingLeft = (item.depth * 14) + "px";
+      label.textContent = node.label;
+
+      var track = document.createElement("span");
+      track.className = "tl-track";
+
+      var leftPct = ((node.ts - state.sessionStart) / total) * 100;
+      var color = node.error ? "var(--c-error)" : TYPE_COLOR[node.type];
+
+      if (node.duration && node.duration > 0) {
+        var bar = document.createElement("span");
+        bar.className = "tl-bar";
+        var widthPct = Math.max((node.duration / total) * 100, 0.4);
+        bar.style.left = leftPct + "%";
+        bar.style.width = widthPct + "%";
+        bar.style.background = color;
+        track.appendChild(bar);
+      } else {
+        var point = document.createElement("span");
+        point.className = "tl-point";
+        point.style.left = leftPct + "%";
+        point.style.background = color;
+        track.appendChild(point);
+      }
+
+      row.appendChild(label);
+      row.appendChild(track);
+      row.addEventListener("click", function () { selectNode(item.id); });
+      rowsEl.appendChild(row);
+    });
+  }
+
+  function renderDetail(id) {
+    var el = document.getElementById("detail");
+    if (!id) {
+      el.innerHTML = '<p class="empty">行をクリックすると詳細が表示されます。</p>';
+      return;
+    }
+    var node = state.nodesById[id];
+    var color = node.error ? "var(--c-error)" : TYPE_COLOR[node.type];
+    var html = "";
+    html += '<span class="badge" style="background:' + color + ';color:#12151a">' + node.type + (node.error ? " · error" : "") + '</span>';
+    html += "<h2>" + escapeHtml(node.name || node.label) + "</h2>";
+    html += '<div class="meta-grid">';
+    html += '<span class="k">Timestamp</span><span class="v">' + new Date(node.ts).toLocaleTimeString() + (node.synthetic ? " (推定)" : "") + '</span>';
+    html += '<span class="k">Offset</span><span class="v">+' + fmtDuration(node.ts - state.sessionStart) + '</span>';
+    html += '<span class="k">Duration</span><span class="v">' + fmtDuration(node.duration) + '</span>';
+    html += '</div>';
+    if (node.input !== undefined) {
+      html += '<div class="detail-section"><div class="k">Input</div><pre>' + escapeHtml(JSON.stringify(node.input, null, 2)) + '</pre></div>';
+    }
+    if (node.output !== undefined && node.output !== null) {
+      html += '<div class="detail-section"><div class="k">Output</div><pre>' + escapeHtml(textFromContent(node.output)) + '</pre></div>';
+    }
+    if (node.detail !== undefined && node.input === undefined) {
+      html += '<div class="detail-section"><div class="k">Content</div><pre>' + escapeHtml(typeof node.detail === "string" ? node.detail : JSON.stringify(node.detail, null, 2)) + '</pre></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  function selectNode(id) {
+    state.selected = id;
+    renderTree();
+    renderTimeline();
+    renderDetail(id);
+  }
+
+  function handleFile(file) {
+    var reader = new FileReader();
+    reader.onload = function (e) { loadData(e.target.result); };
+    reader.readAsText(file);
+  }
+
+  document.getElementById("demoBtn").addEventListener("click", function () { loadData(DEMO_JSONL); });
+  document.getElementById("demoBtn2").addEventListener("click", function () { loadData(DEMO_JSONL); });
+  document.getElementById("fileInput").addEventListener("change", function (e) { if (e.target.files[0]) handleFile(e.target.files[0]); });
+  document.getElementById("fileInput2").addEventListener("change", function (e) { if (e.target.files[0]) handleFile(e.target.files[0]); });
+
+  document.querySelectorAll(".tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      document.querySelectorAll(".tab").forEach(function (t) { t.classList.remove("active"); });
+      tab.classList.add("active");
+      var which = tab.dataset.tab;
+      document.getElementById("treeView").hidden = which !== "tree";
+      document.getElementById("timelineView").hidden = which !== "timeline";
+    });
+  });
+})();
+</script>
+</body>
+</html>
