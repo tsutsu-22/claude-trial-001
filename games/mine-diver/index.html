@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>マインダイバー</title>
+<meta name="description" content="踏んでも即死しないマインスイーパ。HPを削りながら深く潜るローグライト。" />
+<meta name="theme-color" content="#15181e" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛏️</text></svg>" />
+<style>
+  :root {
+    --ground: #15181e;
+    --panel: #1d212a;
+    --panel-hi: #262b35;
+    --line: #333a47;
+    --text: #e9ebef;
+    --dim: #9aa2af;
+    --faint: #646c7a;
+    --brass: #d9a441;
+    --n1: #6fa0e0;
+    --n2: #6cc16c;
+    --n3: #e2645a;
+    --n4: #a982d8;
+    --n5: #e08a4a;
+    --n6: #4fc0b0;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN",
+            "Hiragino Sans", "Yu Gothic", "Noto Sans JP", Meiryo, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background: var(--ground);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .wrap {
+    width: 100%;
+    max-width: 460px;
+    padding: 12px 12px calc(16px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .back {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--faint);
+    text-decoration: none;
+  }
+  .back:hover { color: var(--text); }
+  h1 { margin: 0; font-size: 1rem; font-weight: 700; letter-spacing: -0.01em; }
+
+  /* ---- HUD ---- */
+  .hud {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 8px 11px;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .hearts { letter-spacing: 0.08em; color: var(--n3); font-size: 0.9rem; }
+  .hearts .lost { color: #3d434e; }
+  .gold { color: var(--brass); }
+  .depth { color: var(--text); font-weight: 700; }
+
+  /* ---- board ---- */
+  .board-holder { display: flex; justify-content: center; }
+  .board {
+    display: grid;
+    gap: 2px;
+    padding: 4px;
+    background: #0f1217;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    width: 100%;
+    /* 高さを 56vh に収めるため、幅の上限のほうを絞ってマス目を正方形に保つ */
+    max-width: calc(56vh * var(--arn));
+    aspect-ratio: var(--ar);
+    touch-action: manipulation;
+  }
+
+  .cell {
+    all: unset;
+    display: grid;
+    place-items: center;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: var(--cf, 15px);
+    line-height: 1;
+    cursor: pointer;
+    background: linear-gradient(#3a4250, #2b323d);
+    border: 1px solid #48515f;
+    position: relative;
+    overflow: hidden;
+  }
+  .cell:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }
+  .cell.open {
+    background: #12151b;
+    border-color: #1d222a;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+    cursor: default;
+  }
+  .cell.hit { background: #35201f; border-color: #63332f; }
+  .cell.lit { box-shadow: inset 0 0 0 2px var(--n3); }
+  .cell.aim { box-shadow: inset 0 0 0 2px var(--brass); }
+  .cell .peek { color: var(--faint); font-size: 0.72em; opacity: 0.95; }
+  .cell .mark { position: absolute; top: 1px; right: 2px; font-size: 0.6em; }
+  .cell .mark.safe { color: var(--n2); }
+  .cell .mark.danger { color: var(--n3); }
+  .n-1 { color: var(--n1); } .n-2 { color: var(--n2); } .n-3 { color: var(--n3); }
+  .n-4 { color: var(--n4); } .n-5 { color: var(--n5); } .n-6 { color: var(--n6); }
+  .n-7 { color: var(--dim); } .n-8 { color: var(--faint); }
+
+  /* ---- controls ---- */
+  .bar { display: flex; align-items: center; gap: 8px; }
+  .remain { font-family: var(--mono); font-size: 0.76rem; color: var(--dim); white-space: nowrap; }
+  .spacer { flex: 1; }
+
+  .mode {
+    all: unset;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 7px 13px;
+    cursor: pointer;
+    background: var(--panel);
+    color: var(--faint);
+    white-space: nowrap;
+  }
+  .mode:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  .mode b { color: var(--text); }
+  .mode.flagging { border-color: var(--brass); color: var(--brass); }
+  .mode.flagging b { color: var(--brass); }
+
+  .slots { display: flex; flex-wrap: wrap; gap: 6px; min-height: 34px; }
+  .slot {
+    all: unset;
+    position: relative;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    font-size: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
+    cursor: default;
+  }
+  .slot.usable { cursor: pointer; border-color: var(--brass); }
+  .slot.spent { opacity: 0.32; }
+  .slot.active { background: var(--brass); }
+  .slot:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  .slot sup {
+    position: absolute;
+    top: -1px;
+    right: 2px;
+    font-family: var(--mono);
+    font-size: 0.52rem;
+    color: var(--brass);
+  }
+
+  .aiming {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    color: var(--brass);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .aiming button {
+    all: unset;
+    cursor: pointer;
+    color: var(--faint);
+    text-decoration: underline;
+  }
+
+  .toast {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    color: var(--dim);
+    min-height: 1.2em;
+  }
+  .toast.warn { color: var(--n3); }
+  .toast.good { color: var(--n2); }
+
+  /* ---- overlay panels ---- */
+  .sheet {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 12, 16, 0.86);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    z-index: 10;
+  }
+  .sheet[hidden] { display: none; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px;
+    width: 100%;
+    max-width: 400px;
+    max-height: 88vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .card h2 { margin: 0; font-size: 1.15rem; font-weight: 700; }
+  .card .sub { margin: 0; font-family: var(--mono); font-size: 0.72rem; color: var(--faint); }
+
+  .buy {
+    all: unset;
+    display: flex;
+    gap: 11px;
+    align-items: flex-start;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 11px 12px;
+    cursor: pointer;
+    background: var(--panel-hi);
+  }
+  .buy:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  .buy[disabled] { opacity: 0.4; cursor: not-allowed; }
+  .buy .ico { font-size: 1.35rem; line-height: 1.2; }
+  .buy .body { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+  .buy .nm { font-size: 0.9rem; font-weight: 700; display: flex; gap: 7px; align-items: baseline; }
+  .buy .ds { font-size: 0.76rem; color: var(--dim); line-height: 1.55; }
+  .buy .pr { font-family: var(--mono); font-size: 0.78rem; color: var(--brass); white-space: nowrap; }
+  .buy .pr.gain { color: var(--n2); }
+  .tag {
+    font-family: var(--mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.08em;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+  .tag.info { color: var(--n1); } .tag.life { color: var(--n2); }
+  .tag.gold { color: var(--brass); } .tag.tool { color: var(--n4); }
+  .tag.curse { color: var(--n3); }
+
+  .go {
+    all: unset;
+    text-align: center;
+    background: var(--brass);
+    color: #201a0c;
+    font-weight: 700;
+    font-size: 0.92rem;
+    border-radius: 8px;
+    padding: 13px 0;
+    cursor: pointer;
+    /* 品揃えが長くても主要動線が画面内に残るよう下端へ貼り付ける */
+    position: sticky;
+    bottom: 0;
+    box-shadow: 0 -10px 14px -8px var(--panel);
+  }
+  .go:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  .go.ghost { background: transparent; border: 1px solid var(--line); color: var(--dim); font-weight: 600; }
+
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 0.84rem;
+    color: var(--dim);
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 7px;
+  }
+  .stat-row b { color: var(--text); }
+
+  .owned { display: flex; flex-wrap: wrap; gap: 5px; }
+  .owned span {
+    font-size: 0.95rem;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    width: 30px; height: 30px;
+    display: grid; place-items: center;
+  }
+
+  .hint { font-family: var(--mono); font-size: 0.68rem; color: var(--faint); line-height: 1.7; margin: 0; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="back" href="../">← Games</a>
+    <h1>⛏ マインダイバー</h1>
+  </div>
+
+  <div class="hud">
+    <span class="hearts" id="hearts"></span>
+    <span class="gold" id="gold">💰 0</span>
+    <span class="depth" id="depth">B1F</span>
+  </div>
+
+  <div class="board-holder">
+    <div class="board" id="board"></div>
+  </div>
+
+  <div class="bar">
+    <span class="remain" id="remain"></span>
+    <span class="spacer"></span>
+    <button class="mode" id="mode" type="button"><b>⛏</b> / 🚩</button>
+  </div>
+
+  <div class="slots" id="slots"></div>
+  <div class="aiming" id="aiming" hidden></div>
+  <div class="toast" id="toast"></div>
+  <p class="hint">タップで開く・長押しで旗。数字を押すと旗の数が合っていれば一括開放。</p>
+</div>
+
+<div class="sheet" id="sheet" hidden><div class="card" id="card"></div></div>
+
+<script>
+(() => {
+  "use strict";
+
+  const STORAGE_KEY = "mine-diver-record";
+  const LONG_PRESS = 380;
+
+  const ITEMS = [
+    // 情報
+    { id: "lantern", name: "カンテラ",       cat: "info", price: 25, icon: "🔦", desc: "各フロア開始時、安全マスを1つ自動で開く" },
+    { id: "map",     name: "古地図",         cat: "info", price: 30, icon: "🗺️", desc: "各フロア開始時、モンスター1体に旗が立つ" },
+    { id: "probe",   name: "探知棒",         cat: "info", price: 50, icon: "📡", desc: "1フロア3回、選んだマスの数字だけを覗く", uses: 3 },
+    { id: "clair",   name: "千里眼",         cat: "info", price: 55, icon: "👁️", desc: "1フロア2回、選んだマスが安全か判定する", uses: 2 },
+    { id: "compass", name: "羅針盤",         cat: "info", price: 60, icon: "🧭", desc: "残り3体以下になると位置が光る" },
+    // 生存
+    { id: "kit",     name: "応急キット",     cat: "life", price: 35, icon: "🧰", desc: "最大HP+1、そのうえで全回復", repeat: true },
+    { id: "armor",   name: "鉄の鎧",         cat: "life", price: 55, icon: "🛡️", desc: "各フロアで最初の被弾を無効化する" },
+    { id: "clover",  name: "四つ葉",         cat: "life", price: 30, icon: "🍀", desc: "被弾時、25%でダメージを受けない" },
+    { id: "wing",    name: "天使の羽",       cat: "life", price: 70, icon: "🪽", desc: "HPが0になったとき1度だけHP2で復活" },
+    { id: "ration",  name: "携帯食",         cat: "life", price: 30, icon: "🍞", desc: "フロアクリアごとにHP+1" },
+    // 経済
+    { id: "purse",   name: "金袋",           cat: "gold", price: 30, icon: "💰", desc: "獲得ゴールド1.5倍" },
+    { id: "bounty",  name: "賞金首手配書",   cat: "gold", price: 25, icon: "📜", desc: "正しい旗の賞金が 2G → 6G" },
+    { id: "regular", name: "常連札",         cat: "gold", price: 40, icon: "🎫", desc: "商店の価格が25%引きになる" },
+    // 道具
+    { id: "bolt",    name: "落雷の杖",       cat: "tool", price: 60, icon: "⚡", desc: "1フロア1回、3×3を安全に開放する", uses: 1 },
+    { id: "hammer",  name: "大槌",           cat: "tool", price: 50, icon: "🔨", desc: "1フロア1回、選んだマスを安全に開放する", uses: 1 },
+    // 呪い（受け取るとゴールドが入る）
+    { id: "ring",    name: "呪いの指輪",     cat: "curse", price: -60, icon: "💍", desc: "被ダメージ2倍。そのかわり獲得ゴールドも2倍" },
+    { id: "pact",    name: "血の契約",       cat: "curse", price: -40, icon: "🩸", desc: "最大HP−1。商店の品揃えが4品になる" },
+    { id: "candle",  name: "暗闇の蝋燭",     cat: "curse", price: -70, icon: "🕯️", desc: "数字の2割が隠れる。獲得ゴールド2倍" },
+    { id: "coin",    name: "賭博師のコイン", cat: "curse", price: -50, icon: "🎲", desc: "フロア開始時、半々で安全3マス開放かモンスター+2" },
+  ];
+  const byId = Object.fromEntries(ITEMS.map((i) => [i.id, i]));
+  const CAT_LABEL = { info: "情報", life: "生存", gold: "経済", tool: "道具", curse: "呪い" };
+
+  const el = {
+    board: document.getElementById("board"),
+    hearts: document.getElementById("hearts"),
+    gold: document.getElementById("gold"),
+    depth: document.getElementById("depth"),
+    remain: document.getElementById("remain"),
+    mode: document.getElementById("mode"),
+    slots: document.getElementById("slots"),
+    aiming: document.getElementById("aiming"),
+    toast: document.getElementById("toast"),
+    sheet: document.getElementById("sheet"),
+    card: document.getElementById("card"),
+  };
+
+  let record = { floor: 1, gold: 0 };
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    if (saved && typeof saved.floor === "number") record = saved;
+  } catch (e) { /* 保存が壊れていても既定値で続行する */ }
+
+  let S = null;          // run state
+  let B = null;          // board state
+  let flagging = false;  // 🚩 mode
+  let aiming = null;     // active item awaiting a target
+
+  /* ---------------- floor setup ---------------- */
+
+  function floorConfig(f) {
+    if (f <= 2)  return { cols: 6, rows: 7,  mines: f === 1 ? 5 : 6,   dmg: 1 };
+    if (f <= 4)  return { cols: 7, rows: 8,  mines: f === 3 ? 8 : 10,  dmg: f === 3 ? 1 : 2 };
+    if (f <= 6)  return { cols: 8, rows: 9,  mines: f === 5 ? 13 : 15, dmg: 2 };
+    if (f <= 8)  return { cols: 8, rows: 10, mines: f === 7 ? 17 : 19, dmg: 3 };
+    if (f <= 10) return { cols: 9, rows: 11, mines: f === 9 ? 23 : 25, dmg: 3 };
+    return { cols: 9, rows: 11, mines: Math.min(46, 25 + (f - 10) * 2), dmg: 4 + Math.floor((f - 10) / 4) };
+  }
+
+  const has = (id) => S.items.includes(id);
+
+  function newRun() {
+    S = { hp: 5, maxHp: 5, gold: 0, floor: 1, items: [], uses: {}, wingUsed: false, over: false, cleared10: false };
+    startFloor();
+  }
+
+  function startFloor() {
+    const cfg = floorConfig(S.floor);
+    let mines = cfg.mines;
+    let bonusOpens = 0;
+
+    if (has("coin")) {
+      if (Math.random() < 0.5) bonusOpens += 3;
+      else mines += 2;
+    }
+    if (has("lantern")) bonusOpens += 1;
+
+    buildBoard(cfg.cols, cfg.rows, mines, cfg.dmg);
+
+    // 開始時に安全な一角を開いておく（意味のない初手タップをなくす）
+    floodOpen(B.seed);
+    for (let i = 0; i < bonusOpens; i++) openRandomSafe();
+    if (has("map")) autoFlagOne();
+
+    S.uses = {};
+    for (const id of S.items) if (byId[id].uses) S.uses[id] = byId[id].uses;
+    B.armorUsed = false;
+
+    aiming = null;
+    renderAll();
+    checkClear();
+  }
+
+  function buildBoard(cols, rows, mineCount, dmg) {
+    const n = cols * rows;
+    B = {
+      cols, rows, n, dmg,
+      mine: new Array(n).fill(false),
+      num: new Array(n).fill(0),
+      revealed: new Array(n).fill(false),
+      flagged: new Array(n).fill(false),
+      defeated: new Array(n).fill(false),
+      hidden: new Array(n).fill(false),
+      peeked: new Array(n).fill(null),
+      marked: new Array(n).fill(null),
+      mineCount: 0,
+      armorUsed: false,
+      seed: 0,
+    };
+
+    // 種となる安全マスとその周囲を除外してモンスターを配置する
+    const seed = Math.floor(Math.random() * n);
+    B.seed = seed;
+    const banned = new Set([seed, ...neighbors(seed)]);
+    const spots = [];
+    for (let i = 0; i < n; i++) if (!banned.has(i)) spots.push(i);
+    for (let i = spots.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [spots[i], spots[j]] = [spots[j], spots[i]];
+    }
+    const placed = Math.min(mineCount, spots.length);
+    for (let i = 0; i < placed; i++) B.mine[spots[i]] = true;
+    B.mineCount = placed;
+
+    for (let i = 0; i < n; i++) {
+      if (B.mine[i]) continue;
+      let c = 0;
+      for (const j of neighbors(i)) if (B.mine[j]) c++;
+      B.num[i] = c;
+      if (has("candle") && c > 0 && Math.random() < 0.2) B.hidden[i] = true;
+    }
+  }
+
+  function neighbors(i) {
+    const out = [];
+    const x = i % B.cols, y = Math.floor(i / B.cols);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= B.cols || ny >= B.rows) continue;
+        out.push(ny * B.cols + nx);
+      }
+    }
+    return out;
+  }
+
+  /* ---------------- actions ---------------- */
+
+  function addGold(base) {
+    let mult = 1;
+    if (has("purse")) mult *= 1.5;
+    if (has("ring")) mult *= 2;
+    if (has("candle")) mult *= 2;
+    S.gold += Math.round(base * mult);
+  }
+
+  function floodOpen(start) {
+    const stack = [start];
+    let opened = 0;
+    while (stack.length) {
+      const i = stack.pop();
+      if (B.revealed[i] || B.flagged[i] || B.mine[i]) continue;
+      B.revealed[i] = true;
+      B.marked[i] = null;
+      B.peeked[i] = null;
+      opened++;
+      if (B.num[i] === 0) for (const j of neighbors(i)) stack.push(j);
+    }
+    if (opened) addGold(opened);
+    return opened;
+  }
+
+  function openRandomSafe() {
+    const pool = [];
+    for (let i = 0; i < B.n; i++) if (!B.mine[i] && !B.revealed[i] && !B.flagged[i]) pool.push(i);
+    if (!pool.length) return;
+    floodOpen(pool[Math.floor(Math.random() * pool.length)]);
+  }
+
+  function autoFlagOne() {
+    const pool = [];
+    for (let i = 0; i < B.n; i++) if (B.mine[i] && !B.flagged[i] && !B.defeated[i]) pool.push(i);
+    if (!pool.length) return;
+    B.flagged[pool[Math.floor(Math.random() * pool.length)]] = true;
+  }
+
+  function hitMine(i) {
+    B.revealed[i] = true;
+    B.defeated[i] = true;
+    B.marked[i] = null;
+
+    let dmg = B.dmg;
+    if (has("ring")) dmg *= 2;
+    let note = `モンスター！ HP −${dmg}`;
+
+    if (has("armor") && !B.armorUsed) {
+      B.armorUsed = true;
+      dmg = 0;
+      note = "鉄の鎧が受け止めた";
+    } else if (has("clover") && Math.random() < 0.25) {
+      dmg = 0;
+      note = "四つ葉が守った";
+    }
+
+    S.hp -= dmg;
+    toast(note, dmg > 0 ? "warn" : "good");
+
+    if (S.hp <= 0) {
+      if (has("wing") && !S.wingUsed) {
+        S.wingUsed = true;
+        S.hp = 2;
+        toast("天使の羽が砕けた — HP2で復活", "good");
+      } else {
+        S.hp = 0;
+        gameOver();
+      }
+    }
+  }
+
+  function tapCell(i) {
+    if (S.over) return;
+
+    if (aiming) { useOn(i); return; }
+
+    if (flagging && !B.revealed[i]) { toggleFlag(i); return; }
+    if (B.flagged[i]) return;
+
+    if (B.revealed[i]) { chord(i); return; }
+
+    if (B.mine[i]) hitMine(i);
+    else floodOpen(i);
+
+    renderAll();
+    checkClear();
+  }
+
+  function toggleFlag(i) {
+    if (B.revealed[i]) return;
+    B.flagged[i] = !B.flagged[i];
+    renderAll();
+  }
+
+  function chord(i) {
+    if (B.num[i] === 0 || B.defeated[i]) return;
+    const around = neighbors(i);
+    const flags = around.filter((j) => B.flagged[j]).length;
+    if (flags !== B.num[i]) {
+      toast("旗の数が数字と合っていない");
+      return;
+    }
+    for (const j of around) {
+      if (B.flagged[j] || B.revealed[j]) continue;
+      if (B.mine[j]) hitMine(j);
+      else floodOpen(j);
+      if (S.over) break;
+    }
+    renderAll();
+    checkClear();
+  }
+
+  /* ---------------- active items ---------------- */
+
+  function startAiming(id) {
+    if (S.over || !S.uses[id]) return;
+    aiming = id;
+    renderAll();
+  }
+
+  function cancelAiming() { aiming = null; renderAll(); }
+
+  function useOn(i) {
+    const id = aiming;
+    aiming = null;
+
+    if (id === "probe") {
+      if (B.revealed[i]) { toast("開いていないマスを選んで"); renderAll(); return; }
+      B.peeked[i] = B.mine[i] ? "M" : B.num[i];
+      S.uses.probe--;
+      toast(B.mine[i] ? "反応あり — モンスターだ" : `数字は ${B.num[i]}`);
+    } else if (id === "clair") {
+      if (B.revealed[i]) { toast("開いていないマスを選んで"); renderAll(); return; }
+      B.marked[i] = B.mine[i] ? "danger" : "safe";
+      S.uses.clair--;
+      toast(B.mine[i] ? "危険 — ここにいる" : "安全 — 開けてよい");
+    } else if (id === "bolt") {
+      const area = [i, ...neighbors(i)];
+      let killed = 0;
+      for (const j of area) {
+        if (B.revealed[j]) continue;
+        if (B.mine[j]) { B.revealed[j] = true; B.defeated[j] = true; B.flagged[j] = false; killed++; }
+        else { B.flagged[j] = false; floodOpen(j); }
+      }
+      S.uses.bolt--;
+      toast(killed ? `落雷 — ${killed}体を撃破` : "落雷 — 一帯を開放");
+    } else if (id === "hammer") {
+      if (B.revealed[i]) { toast("開いていないマスを選んで"); renderAll(); return; }
+      B.flagged[i] = false;
+      if (B.mine[i]) { B.revealed[i] = true; B.defeated[i] = true; toast("大槌 — 無害化した"); }
+      else { floodOpen(i); toast("大槌 — 安全に開いた"); }
+      S.uses.hammer--;
+    }
+
+    renderAll();
+    checkClear();
+  }
+
+  /* ---------------- floor flow ---------------- */
+
+  function remaining() {
+    let flags = 0, defeated = 0;
+    for (let i = 0; i < B.n; i++) {
+      if (B.defeated[i]) defeated++;
+      else if (B.flagged[i]) flags++;
+    }
+    return B.mineCount - flags - defeated;
+  }
+
+  function checkClear() {
+    if (S.over) return;
+    for (let i = 0; i < B.n; i++) if (!B.mine[i] && !B.revealed[i]) return;
+    floorCleared();
+  }
+
+  function floorCleared() {
+    let correct = 0;
+    for (let i = 0; i < B.n; i++) if (B.mine[i] && B.flagged[i] && !B.defeated[i]) correct++;
+    const perFlag = has("bounty") ? 6 : 2;
+    const before = S.gold;
+    addGold(correct * perFlag + 5 * S.floor);
+    const earned = S.gold - before;
+
+    if (has("ration") && S.hp < S.maxHp) S.hp++;
+
+    const justCleared10 = S.floor === 10 && !S.cleared10;
+    if (justCleared10) S.cleared10 = true;
+
+    saveRecord();
+    renderAll();
+    showShop(correct, perFlag, earned, justCleared10);
+  }
+
+  function gameOver() {
+    S.over = true;
+    saveRecord();
+    renderAll();
+    showEnd();
+  }
+
+  function saveRecord() {
+    const best = { floor: Math.max(record.floor, S.floor), gold: Math.max(record.gold, S.gold) };
+    record = best;
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(best)); } catch (e) { /* 保存できなくても続行 */ }
+  }
+
+  /* ---------------- shop ---------------- */
+
+  function shopPrice(item) {
+    const p = has("regular") ? Math.round(item.price * 0.75) : item.price;
+    return p;
+  }
+
+  function pickOffers() {
+    const slots = has("pact") ? 4 : 3;
+    const pool = ITEMS.filter((it) => it.cat !== "curse" && (it.repeat || !has(it.id)));
+    const shuffled = pool.slice();
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled.slice(0, slots);
+  }
+
+  function pickCurse() {
+    const pool = ITEMS.filter((it) => it.cat === "curse" && !has(it.id));
+    if (!pool.length) return null;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  function buy(item) {
+    const price = shopPrice(item);
+    if (S.gold < price) return;
+    S.gold -= price;
+    applyItem(item);
+    redrawShop();
+  }
+
+  function takeCurse(item) {
+    S.gold += -item.price;
+    applyItem(item);
+    redrawShop();
+  }
+
+  function applyItem(item) {
+    if (item.id === "kit") {
+      S.maxHp++;
+      S.hp = S.maxHp;
+    } else if (item.id === "pact") {
+      S.maxHp = Math.max(1, S.maxHp - 1);
+      S.hp = Math.min(S.hp, S.maxHp);
+    }
+    if (!S.items.includes(item.id)) S.items.push(item.id);
+    if (item.uses) S.uses[item.id] = item.uses;
+    renderAll();
+  }
+
+  function heal() {
+    const price = has("regular") ? 15 : 20;
+    if (S.gold < price || S.hp >= S.maxHp) return;
+    S.gold -= price;
+    S.hp = Math.min(S.maxHp, S.hp + 2);
+    redrawShop();
+  }
+
+  let shopCtx = null;
+
+  function showShop(correct, perFlag, earned, cleared10) {
+    shopCtx = { correct, perFlag, earned, cleared10, offers: pickOffers(), curse: pickCurse() };
+    redrawShop();
+    el.sheet.hidden = false;
+  }
+
+  function redrawShop() {
+    const c = shopCtx;
+    const healPrice = has("regular") ? 15 : 20;
+    el.card.replaceChildren();
+
+    const h = document.createElement("h2");
+    h.textContent = c.cleared10 ? "B10 踏破！" : `B${S.floor}F クリア`;
+    const sub = document.createElement("p");
+    sub.className = "sub";
+    sub.textContent = c.cleared10
+      ? "ここからは記録更新の潜行がはじまる"
+      : `旗 ${c.correct}本 × ${c.perFlag}G ＋ クリア報酬 = +${c.earned}G`;
+    el.card.append(h, sub);
+
+    const stat = document.createElement("div");
+    stat.className = "stat-row";
+    stat.innerHTML = `<span>所持金 <b>${S.gold}G</b></span><span>HP <b>${S.hp}/${S.maxHp}</b></span>`;
+    el.card.append(stat);
+
+    for (const item of c.offers) {
+      const price = shopPrice(item);
+      const b = document.createElement("button");
+      b.className = "buy";
+      b.type = "button";
+      const owned = has(item.id) && !item.repeat;
+      b.disabled = owned || S.gold < price;
+      b.innerHTML =
+        `<span class="ico">${item.icon}</span>` +
+        `<span class="body"><span class="nm">${item.name}<span class="tag ${item.cat}">${CAT_LABEL[item.cat]}</span></span>` +
+        `<span class="ds">${item.desc}</span></span>` +
+        `<span class="pr">${owned ? "所持済" : price + "G"}</span>`;
+      b.addEventListener("click", () => buy(item));
+      el.card.append(b);
+    }
+
+    const hb = document.createElement("button");
+    hb.className = "buy";
+    hb.type = "button";
+    hb.disabled = S.gold < healPrice || S.hp >= S.maxHp;
+    hb.innerHTML =
+      `<span class="ico">❤️</span><span class="body"><span class="nm">手当て</span>` +
+      `<span class="ds">HPを2回復する（最大値まで）</span></span><span class="pr">${healPrice}G</span>`;
+    hb.addEventListener("click", heal);
+    el.card.append(hb);
+
+    if (c.curse) {
+      const cb = document.createElement("button");
+      cb.className = "buy";
+      cb.type = "button";
+      cb.innerHTML =
+        `<span class="ico">${c.curse.icon}</span>` +
+        `<span class="body"><span class="nm">${c.curse.name}<span class="tag curse">呪い</span></span>` +
+        `<span class="ds">${c.curse.desc}</span></span>` +
+        `<span class="pr gain">+${-c.curse.price}G</span>`;
+      cb.addEventListener("click", () => takeCurse(c.curse));
+      el.card.append(cb);
+    }
+
+    const go = document.createElement("button");
+    go.className = "go";
+    go.type = "button";
+    go.textContent = `B${S.floor + 1}F へ潜る`;
+    go.addEventListener("click", () => {
+      el.sheet.hidden = true;
+      S.floor++;
+      startFloor();
+    });
+    el.card.append(go);
+  }
+
+  function showEnd() {
+    el.card.replaceChildren();
+    const h = document.createElement("h2");
+    h.textContent = "力尽きた";
+    const sub = document.createElement("p");
+    sub.className = "sub";
+    sub.textContent = `B${S.floor}F で終了`;
+    const stat = document.createElement("div");
+    stat.className = "stat-row";
+    stat.innerHTML = `<span>所持金 <b>${S.gold}G</b></span><span>最深 <b>B${record.floor}F</b></span>`;
+    el.card.append(h, sub, stat);
+
+    if (S.items.length) {
+      const owned = document.createElement("div");
+      owned.className = "owned";
+      for (const id of S.items) {
+        const s = document.createElement("span");
+        s.textContent = byId[id].icon;
+        s.title = byId[id].name;
+        owned.append(s);
+      }
+      el.card.append(owned);
+    }
+
+    const again = document.createElement("button");
+    again.className = "go";
+    again.type = "button";
+    again.textContent = "もういちど潜る";
+    again.addEventListener("click", () => {
+      el.sheet.hidden = true;
+      newRun();
+    });
+    el.card.append(again);
+    el.sheet.hidden = false;
+  }
+
+  /* ---------------- rendering ---------------- */
+
+  let toastTimer = null;
+  function toast(msg, kind) {
+    el.toast.textContent = msg;
+    el.toast.className = "toast" + (kind ? " " + kind : "");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.toast.textContent = ""; }, 2600);
+  }
+
+  function renderAll() {
+    renderHud();
+    renderBoard();
+    renderSlots();
+    renderAiming();
+  }
+
+  function renderHud() {
+    let hearts = "";
+    for (let i = 0; i < S.maxHp; i++) {
+      hearts += i < S.hp ? "♥" : '<span class="lost">♡</span>';
+    }
+    el.hearts.innerHTML = hearts;
+    el.gold.textContent = `💰 ${S.gold}`;
+    el.depth.textContent = `B${S.floor}F`;
+    el.remain.textContent = `残り ${Math.max(0, remaining())} 体 ・ 攻撃力 ${B.dmg}`;
+  }
+
+  function renderBoard() {
+    el.board.style.setProperty("--ar", `${B.cols} / ${B.rows}`);
+    el.board.style.setProperty("--arn", String(B.cols / B.rows));
+    el.board.style.gridTemplateColumns = `repeat(${B.cols}, 1fr)`;
+    el.board.style.gridTemplateRows = `repeat(${B.rows}, 1fr)`;
+    el.board.replaceChildren();
+
+    const lit = has("compass") && remaining() <= 3;
+    const frag = document.createDocumentFragment();
+
+    for (let i = 0; i < B.n; i++) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "cell";
+      b.dataset.i = String(i);
+
+      if (B.revealed[i]) {
+        b.classList.add("open");
+        if (B.defeated[i]) {
+          b.classList.add("hit");
+          b.textContent = "👹";
+        } else if (B.num[i] > 0) {
+          if (B.hidden[i]) {
+            b.textContent = "?";
+            b.classList.add("n-8");
+          } else {
+            b.textContent = String(B.num[i]);
+            b.classList.add("n-" + B.num[i]);
+          }
+        }
+      } else if (B.flagged[i]) {
+        b.textContent = "🚩";
+      } else {
+        if (lit && B.mine[i]) b.classList.add("lit");
+        if (B.peeked[i] !== null) {
+          const s = document.createElement("span");
+          s.className = "peek";
+          s.textContent = B.peeked[i] === "M" ? "👹" : String(B.peeked[i]);
+          b.append(s);
+        }
+        if (B.marked[i]) {
+          const m = document.createElement("span");
+          m.className = "mark " + B.marked[i];
+          m.textContent = B.marked[i] === "safe" ? "✓" : "✕";
+          b.append(m);
+        }
+      }
+      if (aiming) b.classList.add("aim");
+      frag.append(b);
+    }
+    el.board.append(frag);
+    fitFont();
+  }
+
+  function fitFont() {
+    const first = el.board.firstElementChild;
+    if (!first) return;
+    const w = first.getBoundingClientRect().width;
+    if (w > 0) el.board.style.setProperty("--cf", Math.max(10, Math.round(w * 0.52)) + "px");
+  }
+
+  function renderSlots() {
+    el.slots.replaceChildren();
+    for (const id of S.items) {
+      const item = byId[id];
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "slot";
+      b.title = `${item.name} — ${item.desc}`;
+      b.textContent = item.icon;
+      if (item.uses) {
+        const left = S.uses[id] || 0;
+        const sup = document.createElement("sup");
+        sup.textContent = String(left);
+        b.append(sup);
+        if (left > 0 && !S.over) {
+          b.classList.add("usable");
+          if (aiming === id) b.classList.add("active");
+          b.addEventListener("click", () => (aiming === id ? cancelAiming() : startAiming(id)));
+        } else {
+          b.classList.add("spent");
+        }
+      }
+      el.slots.append(b);
+    }
+  }
+
+  function renderAiming() {
+    if (!aiming) { el.aiming.hidden = true; return; }
+    el.aiming.hidden = false;
+    el.aiming.replaceChildren();
+    const t = document.createElement("span");
+    t.textContent = `${byId[aiming].name} — 対象のマスをタップ`;
+    const c = document.createElement("button");
+    c.type = "button";
+    c.textContent = "やめる";
+    c.addEventListener("click", cancelAiming);
+    el.aiming.append(t, c);
+  }
+
+  /* ---------------- input ---------------- */
+
+  let pressTimer = null, pressIdx = -1, pressX = 0, pressY = 0, longFired = false;
+
+  function cellIndexFrom(target) {
+    const c = target.closest(".cell");
+    return c ? Number(c.dataset.i) : -1;
+  }
+
+  el.board.addEventListener("pointerdown", (e) => {
+    const i = cellIndexFrom(e.target);
+    if (i < 0 || S.over) return;
+    pressIdx = i;
+    pressX = e.clientX;
+    pressY = e.clientY;
+    longFired = false;
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      longFired = true;
+      if (!aiming) {
+        toggleFlag(i);
+        if (navigator.vibrate) navigator.vibrate(12);
+      }
+    }, LONG_PRESS);
+  });
+
+  el.board.addEventListener("pointermove", (e) => {
+    if (!pressTimer) return;
+    if (Math.abs(e.clientX - pressX) > 12 || Math.abs(e.clientY - pressY) > 12) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+      pressIdx = -1;
+    }
+  });
+
+  el.board.addEventListener("pointerup", (e) => {
+    const i = cellIndexFrom(e.target);
+    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    if (longFired) { longFired = false; pressIdx = -1; return; }
+    if (i < 0 || i !== pressIdx) { pressIdx = -1; return; }
+    pressIdx = -1;
+    tapCell(i);
+  });
+
+  el.board.addEventListener("pointercancel", () => {
+    clearTimeout(pressTimer);
+    pressTimer = null;
+    pressIdx = -1;
+    longFired = false;
+  });
+
+  el.board.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    const i = cellIndexFrom(e.target);
+    if (i >= 0 && !S.over) toggleFlag(i);
+  });
+
+  el.mode.addEventListener("click", () => {
+    flagging = !flagging;
+    el.mode.classList.toggle("flagging", flagging);
+    el.mode.innerHTML = flagging ? '⛏ / <b>🚩</b>' : '<b>⛏</b> / 🚩';
+  });
+
+  window.addEventListener("resize", fitFont);
+
+  newRun();
+})();
+</script>
+</body>
+</html>
