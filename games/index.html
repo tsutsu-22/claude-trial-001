@@ -23,6 +23,8 @@
 
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
+  /* 指で叩く対象にも直接指定して、ダブルタップ拡大を確実に殺す */
+  a, button { touch-action: manipulation; }
 
   body {
     background:
@@ -31,6 +33,8 @@
     color: var(--text);
     font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
     min-height: 100vh;
+    /* ダブルタップのズームだけ止める。ピンチでの拡大は残す */
+    touch-action: manipulation;
   }
 
   .wrap {
