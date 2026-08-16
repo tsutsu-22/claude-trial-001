@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>マインダイバー</title>
 <meta name="description" content="踏んでも即死しないマインスイーパ。HPを削りながら深く潜るローグライト。" />
 <meta name="theme-color" content="#15181e" />
@@ -30,6 +30,8 @@
 
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
+  /* 指で叩く対象にも直接指定して、ダブルタップ拡大を確実に殺す */
+  a, button, .cell { touch-action: manipulation; }
 
   body {
     background: var(--ground);
@@ -42,6 +44,8 @@
     -webkit-user-select: none;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
+    /* ダブルタップのズームだけ止める。ピンチでの拡大は残す */
+    touch-action: manipulation;
   }
 
   .wrap {
@@ -100,6 +104,7 @@
 
   .cell {
     all: unset;
+    touch-action: manipulation;   /* all:unset が auto に戻すため個別に指定 */
     display: grid;
     place-items: center;
     border-radius: 3px;
@@ -138,6 +143,7 @@
 
   .mode {
     all: unset;
+    touch-action: manipulation;   /* all:unset が auto に戻すため個別に指定 */
     font-family: var(--mono);
     font-size: 0.82rem;
     border: 1px solid var(--line);
@@ -156,6 +162,7 @@
   .slots { display: flex; flex-wrap: wrap; gap: 6px; min-height: 34px; }
   .slot {
     all: unset;
+    touch-action: manipulation;   /* all:unset が auto に戻すため個別に指定 */
     position: relative;
     width: 34px;
     height: 34px;
@@ -190,6 +197,7 @@
   }
   .aiming button {
     all: unset;
+    touch-action: manipulation;   /* all:unset が auto に戻すため個別に指定 */
     cursor: pointer;
     color: var(--faint);
     text-decoration: underline;
@@ -234,6 +242,7 @@
 
   .buy {
     all: unset;
+    touch-action: manipulation;   /* all:unset が auto に戻すため個別に指定 */
     display: flex;
     gap: 11px;
     align-items: flex-start;
@@ -265,6 +274,7 @@
 
   .go {
     all: unset;
+    touch-action: manipulation;   /* all:unset が auto に戻すため個別に指定 */
     text-align: center;
     background: var(--brass);
     color: #201a0c;

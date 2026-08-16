@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>テトリス</title>
 <meta name="description" content="ブラウザで遊べるテトリス。7-bagランダマイザ、ゴーストピース、ハードドロップ対応。" />
 <meta name="theme-color" content="#1b1e24" />
@@ -20,6 +20,8 @@
 
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
+  /* 指で叩く対象にも直接指定して、ダブルタップ拡大を確実に殺す */
+  a, button { touch-action: manipulation; }
 
   body {
     background:
@@ -30,6 +32,8 @@
     min-height: 100vh;
     display: flex;
     justify-content: center;
+    /* ダブルタップのズームだけ止める。ピンチでの拡大は残す */
+    touch-action: manipulation;
   }
 
   .wrap {

@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>テンけし</title>
 <meta name="description" content="同じ数字か、足して10になるペアを消していく数字パズル。" />
 <meta name="theme-color" content="#141620" />
@@ -26,6 +26,8 @@
 
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
+  /* 指で叩く対象にも直接指定して、ダブルタップ拡大を確実に殺す */
+  a, button, .t { touch-action: manipulation; }
 
   body {
     background:
@@ -40,6 +42,8 @@
     -webkit-user-select: none;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
+    /* ダブルタップのズームだけ止める。ピンチでの拡大は残す */
+    touch-action: manipulation;
   }
 
   .wrap {
@@ -118,6 +122,7 @@
 
   .t {
     all: unset;
+    touch-action: manipulation;   /* all:unset が auto に戻すため個別に指定 */
     position: relative;
     aspect-ratio: 1;
     display: grid;
@@ -185,6 +190,7 @@
   .acts { display: flex; gap: 8px; }
   .btn {
     all: unset;
+    touch-action: manipulation;   /* all:unset が auto に戻すため個別に指定 */
     flex: 1;
     text-align: center;
     background: var(--panel);
