@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>テンけし</title>
+<meta name="description" content="同じ数字か、足して10になるペアを消していく数字パズル。" />
+<meta name="theme-color" content="#141620" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔟</text></svg>" />
+<style>
+  :root {
+    --ground: #141620;
+    --panel: #1c1f2b;
+    --panel-hi: #252938;
+    --line: #333849;
+    --text: #e8eaf0;
+    --dim: #969cb0;
+    --faint: #626879;
+    --accent: #8b7cf6;   /* 選択・見出し */
+    --good: #4ade80;     /* 成立の瞬間だけ */
+    --warn: #f0a04a;     /* コンボ */
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN",
+            "Hiragino Sans", "Yu Gothic", "Noto Sans JP", Meiryo, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background:
+      radial-gradient(1200px 500px at 50% -10%, #1d2030 0%, transparent 70%),
+      var(--ground);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .wrap {
+    width: 100%;
+    max-width: 460px;
+    padding: 12px 12px calc(18px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .top { display: flex; align-items: center; justify-content: space-between; }
+  .back { font-family: var(--mono); font-size: 0.72rem; color: var(--faint); text-decoration: none; }
+  .back:hover { color: var(--text); }
+  h1 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  h1 .ten { color: var(--accent); }
+
+  /* ---------- HUD ---------- */
+  .hud {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .hud div {
+    padding: 7px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    border-left: 1px solid var(--line);
+  }
+  .hud div:first-child { border-left: none; }
+  .hud .k {
+    font-family: var(--mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.13em;
+    color: var(--faint);
+  }
+  .hud .v {
+    font-family: var(--mono);
+    font-size: 1.02rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .hud .v.best { color: var(--accent); }
+  #combo { color: var(--warn); }
+  #combo.idle { color: var(--faint); }
+
+  /* ---------- board ---------- */
+  .board-scroll {
+    max-height: 54vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: #101220;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 8px;
+    scrollbar-width: thin;
+  }
+  .board {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
+    gap: 4px;
+  }
+
+  .t {
+    all: unset;
+    position: relative;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    border-radius: 7px;
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: var(--tf, 15px);
+    line-height: 1;
+    cursor: pointer;
+    color: var(--text);
+    background: linear-gradient(180deg, #2e3346, #242936);
+    border: 1px solid #3d4357;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transition: transform 0.11s ease, background 0.14s ease, border-color 0.14s ease;
+  }
+  .t:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .t.sel {
+    background: linear-gradient(180deg, #4d40a0, #3b3180);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(139, 124, 246, 0.3), 0 3px 12px rgba(139, 124, 246, 0.28);
+    transform: translateY(-2px);
+  }
+  .t.hint { border-color: var(--warn); box-shadow: 0 0 0 2px rgba(240, 160, 74, 0.28); }
+  .t.bad { animation: shake 0.3s ease; }
+  .t.flash { animation: pop 0.3s ease-out forwards; }
+
+  /* 消えたマスは穴として残す — 飛び越えて繋がるルールが読めるように */
+  .t.gone {
+    background: #171a26;
+    border-color: transparent;
+    box-shadow: none;
+    color: transparent;
+    cursor: default;
+    transform: none;
+  }
+
+  @keyframes pop {
+    0%   { transform: scale(1); background: linear-gradient(180deg, #35b46a, #2a9c5b); border-color: var(--good); color: #06210f; }
+    60%  { transform: scale(1.18); background: linear-gradient(180deg, #4ade80, #35b46a); border-color: var(--good); color: #06210f; }
+    100% { transform: scale(0.7); opacity: 0; }
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    75% { transform: translateX(4px); }
+  }
+  @keyframes rowflash {
+    0% { opacity: 0; }
+    40% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  .links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+  .links line {
+    stroke: var(--good);
+    stroke-width: 3;
+    stroke-linecap: round;
+    opacity: 0;
+    animation: rowflash 0.42s ease-out forwards;
+  }
+
+  /* ---------- actions ---------- */
+  .acts { display: flex; gap: 8px; }
+  .btn {
+    all: unset;
+    flex: 1;
+    text-align: center;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 12px 0;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: background 0.14s ease, border-color 0.14s ease;
+  }
+  .btn:hover { background: var(--panel-hi); border-color: var(--accent); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn[disabled] { opacity: 0.35; cursor: not-allowed; }
+  .btn .n { font-family: var(--mono); font-size: 0.72rem; color: var(--faint); margin-left: 5px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #14102b; }
+  .btn.primary:hover { background: #9b8ef8; }
+
+  .toast {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    color: var(--dim);
+    min-height: 1.3em;
+    text-align: center;
+  }
+  .toast.good { color: var(--good); }
+  .toast.warn { color: var(--warn); }
+
+  .rules {
+    margin: 0;
+    font-size: 0.7rem;
+    color: var(--faint);
+    line-height: 1.75;
+    text-align: center;
+    max-width: 34em;
+    align-self: center;
+  }
+  .rules b { color: var(--dim); font-weight: 600; }
+
+  /* ---------- sheet ---------- */
+  .sheet {
+    position: fixed; inset: 0; z-index: 20;
+    background: rgba(10, 11, 18, 0.86);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  .sheet[hidden] { display: none; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px;
+    width: 100%;
+    max-width: 360px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    text-align: center;
+  }
+  .card h2 { margin: 0; font-size: 1.35rem; font-weight: 800; }
+  .card .msg { margin: 0; font-size: 0.85rem; color: var(--dim); line-height: 1.7; }
+  .figures { display: flex; justify-content: space-around; gap: 10px; }
+  .fig { display: flex; flex-direction: column; gap: 2px; }
+  .fig .k { font-family: var(--mono); font-size: 0.58rem; letter-spacing: 0.12em; color: var(--faint); }
+  .fig .v { font-family: var(--mono); font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, .t.flash, .links line { animation: none !important; transition: none !important; }
+    .t.flash { opacity: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="back" href="../">← Games</a>
+    <h1><span class="ten">🔟</span> テンけし</h1>
+  </div>
+
+  <div class="hud">
+    <div><span class="k">SCORE</span><span class="v" id="score">0</span></div>
+    <div><span class="k">BEST</span><span class="v best" id="best">0</span></div>
+    <div><span class="k">のこり</span><span class="v" id="left">0</span></div>
+    <div><span class="k">コンボ</span><span class="v idle" id="combo">—</span></div>
+  </div>
+
+  <div class="board-scroll" id="scroll">
+    <div class="board" id="board">
+      <svg class="links" id="links"></svg>
+    </div>
+  </div>
+
+  <div class="acts">
+    <button class="btn" id="add" type="button">たす<span class="n" id="addN">×5</span></button>
+    <button class="btn" id="hint" type="button">ヒント<span class="n" id="hintN">×3</span></button>
+    <button class="btn" id="again" type="button">やりなおす</button>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <p class="rules">
+    <b>同じ数字</b>か<b>たして10</b>の2つを消す。タテ・ヨコ・ナナメで隣、または読んだ順で連続していればつながり、<b>消えたマスは飛び越えられる</b>。
+  </p>
+</div>
+
+<div class="sheet" id="sheet" hidden><div class="card" id="card"></div></div>
+
+<script>
+(() => {
+  "use strict";
+
+  const COLS = 9;
+  const START_ROWS = 3;
+  const MAX_ADDS = 5;
+  const MAX_HINTS = 3;
+  const FLASH_MS = 300;
+  const STORAGE_KEY = "ten-keshi-best";
+
+  const el = {
+    board: document.getElementById("board"),
+    links: document.getElementById("links"),
+    scroll: document.getElementById("scroll"),
+    score: document.getElementById("score"),
+    best: document.getElementById("best"),
+    left: document.getElementById("left"),
+    combo: document.getElementById("combo"),
+    add: document.getElementById("add"),
+    addN: document.getElementById("addN"),
+    hint: document.getElementById("hint"),
+    hintN: document.getElementById("hintN"),
+    again: document.getElementById("again"),
+    toast: document.getElementById("toast"),
+    sheet: document.getElementById("sheet"),
+    card: document.getElementById("card"),
+  };
+
+  let best = Number(localStorage.getItem(STORAGE_KEY) || 0);
+
+  let cells;      // { v, gone }
+  let sel;        // selected index or null
+  let score, combo, adds, hints, busy, over;
+  let tiles = []; // DOM nodes, index-aligned with cells
+
+  /* ---------------- board model ---------------- */
+
+  const rowOf = (i) => Math.floor(i / COLS);
+  const colOf = (i) => i % COLS;
+  const alive = () => cells.reduce((n, c) => n + (c.gone ? 0 : 1), 0);
+
+  function nextAlive(i) {
+    for (let j = i + 1; j < cells.length; j++) if (!cells[j].gone) return j;
+    return -1;
+  }
+
+  function clearBetween(lo, hi, step) {
+    for (let k = lo + step; k < hi; k += step) if (!cells[k].gone) return false;
+    return true;
+  }
+
+  // つながっているか — 読み順で連続、または縦横斜めで（消えたマスは飛び越える）
+  function connected(a, b) {
+    const lo = Math.min(a, b), hi = Math.max(a, b);
+    if (nextAlive(lo) === hi) return true;
+
+    const dr = rowOf(hi) - rowOf(lo);
+    const dc = colOf(hi) - colOf(lo);
+    if (dr === 0) return clearBetween(lo, hi, 1);
+    if (dc === 0) return clearBetween(lo, hi, COLS);
+    if (dr === dc) return clearBetween(lo, hi, COLS + 1);
+    if (dr === -dc) return clearBetween(lo, hi, COLS - 1);
+    return false;
+  }
+
+  function pairOk(a, b) {
+    if (a === b) return false;
+    const x = cells[a], y = cells[b];
+    if (!x || !y || x.gone || y.gone) return false;
+    if (x.v !== y.v && x.v + y.v !== 10) return false;
+    return connected(a, b);
+  }
+
+  function findMove() {
+    for (let i = 0; i < cells.length; i++) {
+      if (cells[i].gone) continue;
+      for (let j = i + 1; j < cells.length; j++) {
+        if (cells[j].gone) continue;
+        if (pairOk(i, j)) return [i, j];
+      }
+    }
+    return null;
+  }
+
+  function randomDigits(n) {
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(1 + Math.floor(Math.random() * 9));
+    return out;
+  }
+
+  function newGame() {
+    // 開始局面に手が無いと最初の一手で詰むので、指せる盤面が出るまで引き直す
+    for (let attempt = 0; attempt < 60; attempt++) {
+      cells = randomDigits(COLS * START_ROWS).map((v) => ({ v, gone: false }));
+      if (findMove()) break;
+    }
+    sel = null;
+    score = 0;
+    combo = 0;
+    adds = MAX_ADDS;
+    hints = MAX_HINTS;
+    busy = false;
+    over = false;
+    el.sheet.hidden = true;
+    buildBoard();
+    renderHud();
+    say("同じ数字か、たして10のペアをさがそう");
+  }
+
+  /* ---------------- rendering ---------------- */
+
+  function buildBoard() {
+    el.board.replaceChildren(el.links);
+    tiles = cells.map((c, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "t" + (c.gone ? " gone" : "");
+      b.dataset.i = String(i);
+      b.textContent = c.gone ? "" : String(c.v);
+      el.board.append(b);
+      return b;
+    });
+    fitFont();
+  }
+
+  function fitFont() {
+    const first = tiles.find((t) => t);
+    if (!first) return;
+    const w = first.getBoundingClientRect().width;
+    if (w > 0) el.board.style.setProperty("--tf", Math.max(11, Math.round(w * 0.5)) + "px");
+  }
+
+  function renderHud() {
+    el.score.textContent = score.toLocaleString();
+    el.best.textContent = Math.max(best, score).toLocaleString();
+    el.left.textContent = alive();
+    // 倍率が1のうちは出さない（×1 は加点されているように見えて紛らわしい）
+    const mult = multiplier();
+    const boosted = combo > 0 && mult > 1;
+    el.combo.textContent = boosted ? "×" + mult : "—";
+    el.combo.classList.toggle("idle", !boosted);
+    el.addN.textContent = "×" + adds;
+    el.hintN.textContent = "×" + hints;
+    el.add.disabled = adds <= 0 || over;
+    el.hint.disabled = hints <= 0 || over;
+  }
+
+  let toastTimer = null;
+  function say(msg, kind) {
+    el.toast.textContent = msg;
+    el.toast.className = "toast" + (kind ? " " + kind : "");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.toast.textContent = ""; }, 2400);
+  }
+
+  function drawLink(a, b) {
+    const box = el.board.getBoundingClientRect();
+    const ra = tiles[a].getBoundingClientRect();
+    const rb = tiles[b].getBoundingClientRect();
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", ra.left - box.left + ra.width / 2);
+    line.setAttribute("y1", ra.top - box.top + ra.height / 2);
+    line.setAttribute("x2", rb.left - box.left + rb.width / 2);
+    line.setAttribute("y2", rb.top - box.top + rb.height / 2);
+    el.links.append(line);
+    setTimeout(() => line.remove(), 450);
+  }
+
+  /* ---------------- play ---------------- */
+
+  function multiplier() {
+    return Math.min(5, Math.ceil(combo / 2));
+  }
+
+  function select(i) {
+    if (busy || over || cells[i].gone) return;
+
+    if (sel === null) {
+      sel = i;
+      tiles[i].classList.add("sel");
+      return;
+    }
+    if (sel === i) {
+      tiles[i].classList.remove("sel");
+      sel = null;
+      return;
+    }
+
+    const a = sel;
+    tiles[a].classList.remove("sel");
+    clearHints();
+
+    if (!pairOk(a, i)) {
+      combo = 0;
+      tiles[i].classList.add("bad");
+      setTimeout(() => tiles[i].classList.remove("bad"), 320);
+      sel = null;
+      const x = cells[a].v, y = cells[i].v;
+      say(x !== y && x + y !== 10 ? `${x} と ${y} は組にならない` : "その2つはつながっていない");
+      renderHud();
+      return;
+    }
+
+    matched(a, i);
+  }
+
+  function matched(a, b) {
+    cells[a].gone = true;
+    cells[b].gone = true;
+    sel = null;
+    busy = true;
+    combo++;
+
+    const gain = 10 * multiplier();
+    score += gain;
+    if (navigator.vibrate) navigator.vibrate(12);
+
+    tiles[a].classList.add("flash");
+    tiles[b].classList.add("flash");
+    drawLink(a, b);
+    say(combo > 1 ? `+${gain}　${combo}れんさ` : `+${gain}`, "good");
+    renderHud();
+
+    setTimeout(() => {
+      const removed = dropFullRows();
+      if (removed > 0) {
+        score += 50 * removed;
+        say(`${removed}行そろった　+${50 * removed}`, "good");
+      }
+      buildBoard();
+      busy = false;
+      renderHud();
+      checkEnd();
+    }, FLASH_MS);
+  }
+
+  // 全部消えた行は残さない（穴だらけの盤面が伸び続けないように）
+  function dropFullRows() {
+    const rows = Math.ceil(cells.length / COLS);
+    const keep = [];
+    let removed = 0;
+    for (let r = 0; r < rows; r++) {
+      const row = cells.slice(r * COLS, r * COLS + COLS);
+      if (row.length && row.every((c) => c.gone)) removed++;
+      else keep.push(...row);
+    }
+    cells = keep;
+    return removed;
+  }
+
+  function addRows() {
+    if (adds <= 0 || over || busy) return;
+    const rest = cells.filter((c) => !c.gone).map((c) => ({ v: c.v, gone: false }));
+    if (!rest.length) return;
+    // 行の途中からそのまま書き足す（紙でやるときと同じ）
+    cells = cells.concat(rest);
+    adds--;
+    combo = 0;
+    sel = null;
+    buildBoard();
+    renderHud();
+    say(`のこり ${rest.length} 個を下に足した`, "warn");
+    el.scroll.scrollTop = el.scroll.scrollHeight;
+    checkEnd();
+  }
+
+  function showHint() {
+    if (hints <= 0 || over || busy) return;
+    const move = findMove();
+    if (!move) { say("消せるペアがない — 「たす」を使おう", "warn"); return; }
+    hints--;
+    clearHints();
+    tiles[move[0]].classList.add("hint");
+    tiles[move[1]].classList.add("hint");
+    setTimeout(clearHints, 2000);
+    renderHud();
+  }
+
+  function clearHints() {
+    for (const t of tiles) t.classList.remove("hint");
+  }
+
+  function checkEnd() {
+    if (alive() === 0) {
+      score += 300;
+      finish(true);
+      return;
+    }
+    if (!findMove()) {
+      if (adds > 0) say("消せるペアがない — 「たす」を使おう", "warn");
+      else finish(false);
+    }
+  }
+
+  function finish(won) {
+    over = true;
+    if (score > best) {
+      best = score;
+      try { localStorage.setItem(STORAGE_KEY, String(best)); } catch (e) { /* 保存できなくても続行 */ }
+    }
+    renderHud();
+
+    el.card.replaceChildren();
+    const h = document.createElement("h2");
+    h.textContent = won ? "ぜんぶ消えた！" : "手づまり";
+    const msg = document.createElement("p");
+    msg.className = "msg";
+    msg.textContent = won
+      ? "クリアボーナス +300"
+      : `消せるペアがなくなり、「たす」も使い切りました。のこり ${alive()} 個。`;
+
+    const figs = document.createElement("div");
+    figs.className = "figures";
+    figs.innerHTML =
+      `<span class="fig"><span class="k">SCORE</span><span class="v">${score.toLocaleString()}</span></span>` +
+      `<span class="fig"><span class="k">BEST</span><span class="v">${best.toLocaleString()}</span></span>`;
+
+    const again = document.createElement("button");
+    again.className = "btn primary";
+    again.type = "button";
+    again.textContent = "もういちど";
+    again.addEventListener("click", newGame);
+
+    el.card.append(h, msg, figs, again);
+    el.sheet.hidden = false;
+  }
+
+  /* ---------------- input ---------------- */
+
+  el.board.addEventListener("click", (e) => {
+    const t = e.target.closest(".t");
+    if (!t) return;
+    select(Number(t.dataset.i));
+  });
+
+  el.add.addEventListener("click", addRows);
+  el.hint.addEventListener("click", showHint);
+  el.again.addEventListener("click", () => {
+    if (over || score === 0 || confirm("最初からやりなおしますか？")) newGame();
+  });
+  window.addEventListener("resize", fitFont);
+
+  newGame();
+})();
+</script>
+</body>
+</html>
